@@ -1,0 +1,146 @@
+name: Scivo — сборка и публикация
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: scivo-pipeline
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      has_app: ${{ steps.check.outputs.has_app }}
+    steps:
+      - name: Получить код
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Распаковать пакеты из папки bundle
+        id: unpack
+        run: |
+          python3 - <<'PY'
+          import os, re, sys, pathlib
+          root = pathlib.Path('.').resolve()
+          bundle_dir = root / 'bundle'
+          bundles = sorted(bundle_dir.glob('*.txt')) if bundle_dir.is_dir() else []
+          start_re = re.compile(r'^=== FILE: (.+?) ===\s*$')
+          end_re = re.compile(r'^=== END FILE ===\s*$')
+          total = 0
+          for bundle in bundles:
+              text = bundle.read_text(encoding='utf-8-sig').replace('\r\n', '\n')
+              current = None
+              buf = []
+              for line in text.split('\n'):
+                  if current is None:
+                      m = start_re.match(line)
+                      if m:
+                          current = m.group(1).strip()
+                          buf = []
+                      continue
+                  if end_re.match(line):
+                      rel = pathlib.PurePosixPath(current)
+                      if rel.is_absolute() or '..' in rel.parts or rel.parts[0] in ('.git', '.github', 'bundle'):
+                          sys.exit(f'Запрещённый путь в пакете: {current}')
+                      target = root.joinpath(*rel.parts)
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      content = '\n'.join(buf)
+                      if not content.endswith('\n'):
+                          content += '\n'
+                      target.write_text(content, encoding='utf-8')
+                      print(f'  + {current}')
+                      total += 1
+                      current = None
+                  else:
+                      buf.append(line)
+              if current is not None:
+                  sys.exit(f'Пакет {bundle.name} обрезан: у файла {current} нет строки окончания. Скопируйте пакет целиком ещё раз.')
+              bundle.unlink()
+              print(f'Пакет {bundle.name} распакован и удалён')
+          print(f'Всего файлов: {total}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f"changed={'true' if bundles else 'false'}\n")
+          PY
+
+      - name: Сохранить распакованные файлы
+        if: steps.unpack.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Распаковка пакета [skip ci]" || echo "Нет изменений"
+          git push origin HEAD:main
+
+      - name: Проверить, есть ли приложение
+        id: check
+        run: |
+          if [ -f pubspec.yaml ]; then
+            echo "has_app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_app=false" >> "$GITHUB_OUTPUT"
+            echo "Приложения пока нет — сборка пропущена. Это нормально."
+          fi
+
+      - name: Проверить секреты
+        if: steps.check.outputs.has_app == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::Не найдены секреты SUPABASE_URL / SUPABASE_ANON_KEY (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+
+      - name: Установить Flutter
+        if: steps.check.outputs.has_app == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Подготовить проект
+        if: steps.check.outputs.has_app == 'true'
+        run: |
+          flutter --version
+          flutter create . --platforms=web --project-name scivo --org ru.scivo
+          rm -f test/widget_test.dart
+          flutter pub get
+
+      - name: Собрать веб-версию
+        if: steps.check.outputs.has_app == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build web --release --base-href /scivo/ \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+          cp build/web/index.html build/web/404.html
+
+      - name: Упаковать сайт
+        if: steps.check.outputs.has_app == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.has_app == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Опубликовать на GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
