@@ -11,14 +11,15 @@ class AppException implements Exception {
 }
 
 /// Переводит технические ошибки в понятные фразы на русском.
+/// Неизвестные ошибки показываются с технической причиной (только на время теста).
 String friendlyError(Object error) {
   if (error is AppException) return error.message;
 
   String raw;
   if (error is AuthException) {
-    raw = error.message;
+    raw = '${error.message} [${error.statusCode ?? '-'}]';
   } else if (error is PostgrestException) {
-    raw = error.message;
+    raw = '${error.message} [${error.code ?? '-'}]';
   } else {
     raw = error.toString();
   }
@@ -29,7 +30,14 @@ String friendlyError(Object error) {
     'invalid login credentials': 'Неверный email или пароль.',
     'user already registered': 'Этот email уже зарегистрирован. Попробуйте войти.',
     'already been registered': 'Этот email уже зарегистрирован. Попробуйте войти.',
+    'email not confirmed': 'Email не подтверждён. Откройте письмо и нажмите ссылку.',
+    'error sending confirmation email': 'Не удалось отправить письмо подтверждения email.',
+    'email address not authorized': 'Не удалось отправить письмо подтверждения email.',
+    'database error saving new user': 'Ошибка сервера при создании аккаунта.',
+    'signups not allowed': 'Регистрация временно закрыта.',
+    'signup is disabled': 'Регистрация временно закрыта.',
     'password should be at least': 'Пароль должен быть не короче 6 символов.',
+    'weak': 'Пароль слишком простой. Придумайте посложнее.',
     'unable to validate email': 'Проверьте правильность email.',
     'invalid format': 'Проверьте правильность email.',
     'rate limit': 'Слишком много попыток. Подождите немного.',
@@ -44,11 +52,22 @@ String friendlyError(Object error) {
     'socketexception': 'Нет связи с интернетом.',
     'clientexception': 'Нет связи с сервером. Проверьте интернет.',
     'failed to fetch': 'Нет связи с сервером. Проверьте интернет.',
-    'timeout': 'Сервер долго не отвечает. Попробуйте ещё раз.',
+    'timeoutexception': 'Сервер долго не отвечает. Попробуйте ещё раз.',
   };
 
   for (final entry in known.entries) {
-    if (text.contains(entry.key)) return entry.value;
+    if (text.contains(entry.key)) {
+      // Для серверных ошибок регистрации оставляем код — он нужен для диагностики.
+      if (entry.key.contains('database') ||
+          entry.key.contains('confirmation') ||
+          entry.key.contains('not authorized')) {
+        return '${entry.value}\nТехническая причина: ${_short(raw)}';
+      }
+      return entry.value;
+    }
   }
-  return 'Что-то пошло не так. Попробуйте ещё раз.';
+  return 'Что-то пошло не так. Попробуйте ещё раз.\n'
+      'Техническая причина: ${_short(raw)}';
 }
+
+String _short(String raw) => raw.length > 160 ? '${raw.substring(0, 160)}…' : raw;
