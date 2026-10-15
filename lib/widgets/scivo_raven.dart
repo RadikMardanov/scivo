@@ -5,11 +5,18 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../art/raven_art.dart';
 
-/// Анимированный Scivo: мягко парит и моргает.
+/// Вороненок: парит и моргает (animated: true) или стоит неподвижно.
 class ScivoRaven extends StatefulWidget {
-  const ScivoRaven({super.key, this.size = 160});
+  const ScivoRaven({
+    super.key,
+    this.size = 160,
+    this.avatarId = 'raven_blue',
+    this.animated = true,
+  });
 
   final double size;
+  final String avatarId;
+  final bool animated;
 
   @override
   State<ScivoRaven> createState() => _ScivoRavenState();
@@ -17,18 +24,20 @@ class ScivoRaven extends StatefulWidget {
 
 class _ScivoRavenState extends State<ScivoRaven>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _bob = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat(reverse: true);
-
+  AnimationController? _bob;
   Timer? _blinkTimer;
   bool _eyesClosed = false;
 
   @override
   void initState() {
     super.initState();
-    _scheduleBlink();
+    if (widget.animated) {
+      _bob = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1600),
+      )..repeat(reverse: true);
+      _scheduleBlink();
+    }
   }
 
   void _scheduleBlink() {
@@ -46,23 +55,27 @@ class _ScivoRavenState extends State<ScivoRaven>
   @override
   void dispose() {
     _blinkTimer?.cancel();
-    _bob.dispose();
+    _bob?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final picture = SvgPicture.string(
+      RavenArt.svg(widget.avatarId, blink: _eyesClosed),
+      width: widget.size,
+      height: widget.size,
+    );
+    final bob = _bob;
+    if (bob == null) return picture;
+
     return AnimatedBuilder(
-      animation: _bob,
+      animation: bob,
       builder: (context, child) {
-        final t = Curves.easeInOut.transform(_bob.value);
+        final t = Curves.easeInOut.transform(bob.value);
         return Transform.translate(offset: Offset(0, -8 * t), child: child);
       },
-      child: SvgPicture.string(
-        _eyesClosed ? RavenArt.blink : RavenArt.idle,
-        width: widget.size,
-        height: widget.size,
-      ),
+      child: picture,
     );
   }
 }
