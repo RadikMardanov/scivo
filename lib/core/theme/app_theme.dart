@@ -7,8 +7,10 @@ class AppColors {
   static const purple = Color(0xFF7248D8);
   static const purpleLight = Color(0xFF9B7BFF);
   static const gold = Color(0xFFFFD700);
+  static const flame = Color(0xFFFF9F43);
   static const night = Color(0xFF1B1F4B);
   static const nightCard = Color(0xFF2A2F6B);
+  static const textDark = Color(0xFF12142E);
   static const success = Color(0xFF4ADE80);
   static const danger = Color(0xFFFF6B6B);
 
@@ -36,7 +38,7 @@ class AppTheme {
       ),
     );
 
-    final textTheme = GoogleFonts.quicksandTextTheme(base.textTheme).apply(
+    final textTheme = GoogleFonts.nunitoTextTheme(base.textTheme).apply(
       bodyColor: Colors.white,
       displayColor: Colors.white,
     );
@@ -48,15 +50,20 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.purple,
           foregroundColor: Colors.white,
+          disabledBackgroundColor: AppColors.purple.withValues(alpha: 0.4),
           minimumSize: const Size(120, 56),
           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-          textStyle: GoogleFonts.quicksand(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
+          textStyle: GoogleFonts.nunito(fontSize: 19, fontWeight: FontWeight.w800),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          minimumSize: const Size(120, 56),
+          side: const BorderSide(color: AppColors.purpleLight, width: 2),
+          textStyle: GoogleFonts.nunito(fontSize: 18, fontWeight: FontWeight.w700),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         ),
       ),
     );
