@@ -1,0 +1,656 @@
+=== FILE: lib/art/raven_art.dart ===
+/// Векторный вороненок Scivo (роль: Иллюстратор). Версия 0.2.
+/// Аватары детей — тот же вороненок в разных цветах оперения.
+class AvatarOption {
+  const AvatarOption({
+    required this.id,
+    required this.label,
+    required this.body,
+    required this.belly,
+    required this.wing,
+  });
+
+  final String id;
+  final String label;
+  final String body;
+  final String belly;
+  final String wing;
+}
+
+class RavenArt {
+  RavenArt._();
+
+  static const List<AvatarOption> avatars = [
+    AvatarOption(id: 'raven_blue', label: 'Синий', body: '#2B2E5C', belly: '#454A8F', wing: '#1E2147'),
+    AvatarOption(id: 'raven_purple', label: 'Фиолетовый', body: '#4B2E83', belly: '#7A5BC7', wing: '#36205F'),
+    AvatarOption(id: 'raven_green', label: 'Изумрудный', body: '#1F5E4A', belly: '#3E9A7A', wing: '#154235'),
+    AvatarOption(id: 'raven_pink', label: 'Розовый', body: '#8A3A6E', belly: '#C46BA3', wing: '#652A50'),
+    AvatarOption(id: 'raven_orange', label: 'Огненный', body: '#8A4B1E', belly: '#C9803F', wing: '#653515'),
+    AvatarOption(id: 'raven_teal', label: 'Морской', body: '#1E5A6E', belly: '#3E95AE', wing: '#154050'),
+  ];
+
+  static AvatarOption avatar(String id) {
+    for (final option in avatars) {
+      if (option.id == id) return option;
+    }
+    return avatars.first;
+  }
+
+  static final Map<String, String> _cache = {};
+
+  static String svg(String avatarId, {bool blink = false}) {
+    final key = '$avatarId|$blink';
+    return _cache.putIfAbsent(key, () {
+      final a = avatar(avatarId);
+      return _template
+          .replaceAll('%%BODY%%', a.body)
+          .replaceAll('%%BELLY%%', a.belly)
+          .replaceAll('%%WING%%', a.wing)
+          .replaceAll('%%EYES%%', blink ? _eyesClosed : _eyesOpen);
+    });
+  }
+
+  static const String _template = r'''
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <ellipse cx="100" cy="192" rx="46" ry="6" fill="#000000" fill-opacity="0.25"/>
+  <path d="M84 168 L100 196 L116 168 Z" fill="%%WING%%"/>
+  <path d="M86 176 L80 190 M86 176 L90 190" stroke="#FFB020" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <path d="M114 176 L110 190 M114 176 L120 190" stroke="#FFB020" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <ellipse cx="100" cy="128" rx="54" ry="56" fill="%%BODY%%"/>
+  <ellipse cx="100" cy="140" rx="32" ry="36" fill="%%BELLY%%"/>
+  <path d="M50 112 Q26 142 52 170 Q70 152 70 122 Z" fill="%%WING%%"/>
+  <path d="M150 112 Q174 142 148 170 Q130 152 130 122 Z" fill="%%WING%%"/>
+  <circle cx="100" cy="72" r="44" fill="%%BODY%%"/>
+  <path d="M100 30 Q90 12 102 2 Q114 16 100 30 Z" fill="#FFD700"/>
+  <path d="M100 30 L101 12" stroke="#E0A800" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <circle cx="72" cy="88" r="7" fill="#FF8FB1" fill-opacity="0.55"/>
+  <circle cx="128" cy="88" r="7" fill="#FF8FB1" fill-opacity="0.55"/>
+  %%EYES%%
+  <path d="M71 50 Q83 46 95 51" stroke="#12142E" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M105 48 Q117 40 129 47" stroke="#12142E" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M90 84 L110 84 L100 100 Z" fill="#FFB020"/>
+  <path d="M90 84 L110 84 L100 90 Z" fill="#FFCC4D"/>
+</svg>
+''';
+
+  static const String _eyesOpen = '''
+  <circle cx="84" cy="68" r="13" fill="#FFFFFF"/>
+  <circle cx="116" cy="68" r="13" fill="#FFFFFF"/>
+  <circle cx="86" cy="70" r="7" fill="#12142E"/>
+  <circle cx="118" cy="70" r="7" fill="#12142E"/>
+  <circle cx="88.5" cy="67" r="2.5" fill="#FFFFFF"/>
+  <circle cx="120.5" cy="67" r="2.5" fill="#FFFFFF"/>
+''';
+
+  static const String _eyesClosed = '''
+  <path d="M72 70 Q84 78 96 70" stroke="#FFFFFF" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M104 70 Q116 78 128 70" stroke="#FFFFFF" stroke-width="4" fill="none" stroke-linecap="round"/>
+''';
+}
+=== END FILE ===
+=== FILE: lib/widgets/scivo_raven.dart ===
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+import '../art/raven_art.dart';
+
+/// Вороненок: парит и моргает (animated: true) или стоит неподвижно.
+class ScivoRaven extends StatefulWidget {
+  const ScivoRaven({
+    super.key,
+    this.size = 160,
+    this.avatarId = 'raven_blue',
+    this.animated = true,
+  });
+
+  final double size;
+  final String avatarId;
+  final bool animated;
+
+  @override
+  State<ScivoRaven> createState() => _ScivoRavenState();
+}
+
+class _ScivoRavenState extends State<ScivoRaven>
+    with SingleTickerProviderStateMixin {
+  AnimationController? _bob;
+  Timer? _blinkTimer;
+  bool _eyesClosed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animated) {
+      _bob = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1600),
+      )..repeat(reverse: true);
+      _scheduleBlink();
+    }
+  }
+
+  void _scheduleBlink() {
+    _blinkTimer = Timer(const Duration(milliseconds: 3200), () {
+      if (!mounted) return;
+      setState(() => _eyesClosed = true);
+      _blinkTimer = Timer(const Duration(milliseconds: 160), () {
+        if (!mounted) return;
+        setState(() => _eyesClosed = false);
+        _scheduleBlink();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _blinkTimer?.cancel();
+    _bob?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final picture = SvgPicture.string(
+      RavenArt.svg(widget.avatarId, blink: _eyesClosed),
+      width: widget.size,
+      height: widget.size,
+    );
+    final bob = _bob;
+    if (bob == null) return picture;
+
+    return AnimatedBuilder(
+      animation: bob,
+      builder: (context, child) {
+        final t = Curves.easeInOut.transform(bob.value);
+        return Transform.translate(offset: Offset(0, -8 * t), child: child);
+      },
+      child: picture,
+    );
+  }
+}
+=== END FILE ===
+=== FILE: lib/widgets/common.dart ===
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../core/theme/app_theme.dart';
+import 'scivo_raven.dart';
+
+/// Ночное небо со звёздами — общий фон приложения.
+class MagicBackground extends StatelessWidget {
+  const MagicBackground({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(gradient: AppColors.nightGradient),
+      child: Stack(
+        children: [
+          const Positioned.fill(
+            child: IgnorePointer(child: CustomPaint(painter: _StarsPainter())),
+          ),
+          Positioned.fill(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _StarsPainter extends CustomPainter {
+  const _StarsPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final random = math.Random(7);
+    final paint = Paint();
+    for (var i = 0; i < 45; i++) {
+      final dx = random.nextDouble() * size.width;
+      final dy = random.nextDouble() * size.height;
+      final radius = 0.6 + random.nextDouble() * 1.6;
+      paint.color = Colors.white.withValues(alpha: 0.15 + random.nextDouble() * 0.45);
+      canvas.drawCircle(Offset(dx, dy), radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class MagicScaffold extends StatelessWidget {
+  const MagicScaffold({
+    super.key,
+    required this.body,
+    this.title,
+    this.actions,
+    this.showBack = true,
+  });
+
+  final Widget body;
+  final String? title;
+  final List<Widget>? actions;
+  final bool showBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final appTitle = title;
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: appTitle == null
+          ? null
+          : AppBar(
+              title: Text(appTitle),
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              automaticallyImplyLeading: showBack,
+              actions: actions,
+            ),
+      body: MagicBackground(child: SafeArea(child: body)),
+    );
+  }
+}
+
+class MagicCard extends StatelessWidget {
+  const MagicCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(20),
+  });
+
+  final Widget child;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: AppColors.nightCard.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: AppColors.purpleLight.withValues(alpha: 0.35),
+          width: 2,
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+class SpeechBubble extends StatelessWidget {
+  const SpeechBubble(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 460),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: AppColors.textDark,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+      ),
+    );
+  }
+}
+
+class ScivoSays extends StatelessWidget {
+  const ScivoSays({
+    super.key,
+    required this.text,
+    this.size = 140,
+    this.avatarId = 'raven_blue',
+  });
+
+  final String text;
+  final double size;
+  final String avatarId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ScivoRaven(size: size, avatarId: avatarId),
+        const SizedBox(height: 12),
+        SpeechBubble(text),
+      ],
+    );
+  }
+}
+
+class CurrencyChip extends StatelessWidget {
+  const CurrencyChip({
+    super.key,
+    required this.emoji,
+    required this.value,
+    this.color = AppColors.gold,
+  });
+
+  final String emoji;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.6), width: 1.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 18)),
+          const SizedBox(width: 6),
+          Text(
+            value,
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SplashView extends StatelessWidget {
+  const SplashView({super.key, this.text = 'Колдую...'});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: MagicBackground(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ScivoRaven(size: 150),
+              const SizedBox(height: 16),
+              Text(text, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 16),
+              const SizedBox(width: 140, child: LinearProgressIndicator()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ErrorView extends StatelessWidget {
+  const ErrorView({super.key, required this.message, this.onRetry, this.extra});
+
+  final String message;
+  final VoidCallback? onRetry;
+  final Widget? extra;
+
+  @override
+  Widget build(BuildContext context) {
+    final retry = onRetry;
+    final extraWidget = extra;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('⚠️', style: TextStyle(fontSize: 48)),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            if (retry != null) ...[
+              const SizedBox(height: 20),
+              FilledButton(onPressed: retry, child: const Text('Попробовать снова')),
+            ],
+            if (extraWidget != null) ...[
+              const SizedBox(height: 12),
+              extraWidget,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+InputDecoration magicInput(String label, {IconData? icon, Widget? suffix, String? hint}) {
+  return InputDecoration(
+    labelText: label,
+    hintText: hint,
+    prefixIcon: icon == null ? null : Icon(icon),
+    suffixIcon: suffix,
+    filled: true,
+    fillColor: Colors.white.withValues(alpha: 0.08),
+    counterText: '',
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(18),
+      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.25)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(18),
+      borderSide: const BorderSide(color: AppColors.gold, width: 2),
+    ),
+  );
+}
+
+Future<void> showScivoDialog(
+  BuildContext context, {
+  required String text,
+  String button = 'Понятно',
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: AppColors.nightCard,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ScivoRaven(size: 120),
+            const SizedBox(height: 12),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: Theme.of(dialogContext).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: Text(button),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+void showSnack(BuildContext context, String text) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(content: Text(text), behavior: SnackBarBehavior.floating),
+    );
+}
+
+/// Русское склонение: pluralRu(5, 'перо', 'пера', 'перьев') -> 'перьев'.
+String pluralRu(int n, String one, String few, String many) {
+  final mod10 = n % 10;
+  final mod100 = n % 100;
+  if (mod10 == 1 && mod100 != 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+=== END FILE ===
+=== FILE: lib/widgets/pin_pad.dart ===
+import 'package:flutter/material.dart';
+
+import '../core/theme/app_theme.dart';
+
+/// Крупная цифровая клавиатура для PIN.
+/// onCompleted возвращает true (PIN принят) или false (очистить и ввести заново).
+class PinPad extends StatefulWidget {
+  const PinPad({super.key, required this.onCompleted, this.length = 4});
+
+  final Future<bool> Function(String pin) onCompleted;
+  final int length;
+
+  @override
+  State<PinPad> createState() => _PinPadState();
+}
+
+class _PinPadState extends State<PinPad> {
+  String _pin = '';
+  bool _busy = false;
+
+  Future<void> _tapDigit(String digit) async {
+    if (_busy || _pin.length >= widget.length) return;
+    setState(() => _pin = _pin + digit);
+    if (_pin.length < widget.length) return;
+
+    setState(() => _busy = true);
+    var ok = false;
+    try {
+      ok = await widget.onCompleted(_pin);
+    } catch (_) {
+      ok = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (!ok) _pin = '';
+    });
+  }
+
+  void _backspace() {
+    if (_busy || _pin.isEmpty) return;
+    setState(() => _pin = _pin.substring(0, _pin.length - 1));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const rows = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['', '0', '<'],
+    ];
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < widget.length; i++)
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                margin: const EdgeInsets.symmetric(horizontal: 10),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: i < _pin.length ? AppColors.gold : Colors.transparent,
+                  border: Border.all(color: AppColors.gold, width: 2.5),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 4,
+          width: 120,
+          child: _busy ? const LinearProgressIndicator() : null,
+        ),
+        const SizedBox(height: 8),
+        for (final row in rows)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final key in row)
+                Padding(
+                  padding: const EdgeInsets.all(7),
+                  child: key.isEmpty
+                      ? const SizedBox(width: 74, height: 74)
+                      : _PinKey(
+                          onTap: key == '<' ? _backspace : () => _tapDigit(key),
+                          child: key == '<'
+                              ? const Icon(Icons.backspace_rounded, size: 28, color: Colors.white)
+                              : Text(
+                                  key,
+                                  style: const TextStyle(
+                                    fontSize: 30,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                        ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _PinKey extends StatelessWidget {
+  const _PinKey({required this.onTap, required this.child});
+
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 74,
+      height: 74,
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.10),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: Center(child: child),
+        ),
+      ),
+    );
+  }
+}
+=== END FILE ===
