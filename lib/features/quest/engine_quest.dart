@@ -90,6 +90,11 @@ class QuestEngine extends StateNotifier<QuestSnapshot> {
       final task = await _service.generateTask(childId, worldId);
       _diag('TASK_RECEIVED',
           'taskId=${task.taskId} mechanic=${task.mechanic} payloadKeys=${task.payload.keys.toList()}');
+      // DIAG_P6: полный дамп payload для офлайн-анализа.
+      try {
+        // ignore: avoid_print
+        print('DIAG_P6_FULL_PAYLOAD_DUMP::${jsonEncode(task.payload)}');
+      } catch (_) {/* safety */}
 
       if (task.taskId.isEmpty) {
         throw Exception('server_returned_empty_task_id');
@@ -312,7 +317,7 @@ class _ReadyBody extends ConsumerWidget {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Почти! Посмотри ещё раз — я рядом. 🐦‍⬛',
+                            'Почти! Посмотри ещё раз — я рядом. 🐦‍',
                             style: const TextStyle(
                                 fontSize: 15, fontWeight: FontWeight.w600),
                           ),
@@ -363,7 +368,6 @@ class _ReadyBody extends ConsumerWidget {
 
   String _promptText(GeneratedTask t) {
     final p = t.payload;
-    // ИСПРАВЛЕНО (P5): поддерживаем оба варианта имени поля типа задачи.
     final kind = _extractKind(p).toLowerCase();
     switch (kind) {
       case 'mul':
@@ -390,46 +394,92 @@ class _ReadyBody extends ConsumerWidget {
   }
 }
 
-/// Извлекает тип задачи из payload, учитывая разные схемы именования.
+/// Извлекает тип задачи из payload, учитывая РАЗНЫЕ схемы именования.
+/// Приоритеты поиска: kind > type > expression heuristic > flat fields.
 String _extractKind(Map<String, dynamic> p) {
-  // Приоритет 1: поле 'kind' (стандарт миграции 002i/j/k)
+  // Схема A: поле 'kind' (стандарт миграции 002i/j/k/l)
   var v = p['kind'];
-  if (v != null && v.toString().isNotEmpty) return v.toString();
+  if (v != null && v.toString().isNotEmpty) return v.toString().trim().toLowerCase();
   
-  // Приоритет 2: поле 'type' (альтернативное имя, встречается в ранних версиях)
+  // Схема B: поле 'type' (альтернативное имя)
   v = p['type'];
-  if (v != null && v.toString().isNotEmpty) return v.toString();
+  if (v != null && v.toString().isNotEmpty) return v.toString().trim().toLowerCase();
   
-  // Приоритет 3: эвристика по наличию полей a+b+op → arith
+  // Схема C: плоская структура с выражением "8+5" или "3*4"
+  final expr = p['expression'] ?? p['expr'];
+  if (expr is String && expr.isNotEmpty) {
+    if (expr.contains('*') || expr.contains('×')) return 'mul';
+    if (expr.contains('-') || expr.contains('−')) return 'sub';
+    if (expr.contains('+')) return 'add';
+    return 'arith'; // неизвестная операция, но точно арифметика
+  }
+  
+  // Схема D: эвристика по наличию полей a+b (+ опционально op/options)
   if (p.containsKey('a') && p.containsKey('b')) {
     if (p.containsKey('options')) return 'mul';
+    final op = _extractOp(p).toLowerCase();
+    if (op == 'mul') return 'mul';
+    if (op == 'sub') return 'sub';
+    if (op == 'add') return 'add';
     return 'arith';
   }
   
-  return '';
+  // Схема E: доли пиццы (parts/need или numerator/denominator)
+  if ((p.containsKey('parts') && p.containsKey('need')) ||
+      (p.containsKey('numerator') && p.containsKey('denominator'))) {
+    return 'shade_frac';
+  }
+  
+  // Схема F: сравнение двух дробей
+  if (p.containsKey('left_num') || p.containsKey('right_num') ||
+      (p.containsKey('frac_left') && p.containsKey('frac_right'))) {
+    return 'compare_frac';
+  }
+  
+  // Схема G: состав числа (total/given или sum/part_a)
+  if ((p.containsKey('total') && p.containsKey('given')) ||
+      (p.containsKey('sum') && p.containsKey('part'))) {
+    return 'compose';
+  }
+  
+  // Схема H: часы (hour/minute)
+  if (p.containsKey('hour') && p.containsKey('minute')) {
+    return 'read_clock';
+  }
+  
+  return ''; // ничего не распознано
 }
 
 /// Извлекает операцию из payload, учитывая разные схемы именования.
 String _extractOp(Map<String, dynamic> p) {
   var v = p['op'];
-  if (v != null && v.toString().isNotEmpty) return v.toString();
+  if (v != null && v.toString().isNotEmpty) return v.toString().trim().toLowerCase();
   
   v = p['operation'];
-  if (v != null && v.toString().isNotEmpty) return v.toString();
+  if (v != null && v.toString().isNotEmpty) return v.toString().trim().toLowerCase();
   
-  // Дефолт для арифметики без явного указания операции
-  return 'add';
+  // Если есть выражение "8+5", извлекаем оператор из него
+  final expr = p['expression'] ?? p['expr'];
+  if (expr is String && expr.isNotEmpty) {
+    if (expr.contains('*') || expr.contains('×')) return 'mul';
+    if (expr.contains('-') || expr.contains('−')) return 'sub';
+    if (expr.contains('+')) return 'add';
+  }
+  
+  return 'add'; // дефолт для арифметики
 }
 
 /// Безопасное приведение значения к int (работает с числами и строками).
 int _toIntSafe(dynamic v, [int d = 0]) {
   if (v == null) return d;
   if (v is num) return v.toInt();
-  if (v is String) return int.tryParse(v) ?? d;
+  if (v is String) return int.tryParse(v.trim()) ?? d;
   return d;
 }
 
 /// Карточка с УСЛОВИЕМ задачи + встроенный визуальный дебаггер.
+/// ИСПРАВЛЕНО (P6): при любом нераспознанном payload ВСЕГДА показываем
+/// оранжевый блок DEBUG INFO с полным JSON, включая случай empty kind.
 class _ConditionCard extends StatelessWidget {
   const _ConditionCard({required this.task});
   final GeneratedTask task;
@@ -440,28 +490,22 @@ class _ConditionCard extends StatelessWidget {
 
     // Защита от пустого payload.
     if (p.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.red.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.redAccent),
-        ),
-        child: const Text(
-          '⚠️ Данные задания пусты.\nНажми «Попробовать снова».',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white, fontSize: 16, height: 1.4),
-        ),
-      );
+      return _DebugInfoBlock(payload: p, reason: 'EMPTY_PAYLOAD_OBJECT');
     }
 
-    final kind = _extractKind(p).toLowerCase();
+    final kind = _extractKind(p);
     final op = _extractOp(p).toLowerCase();
 
     // АРИФМЕТИКА: add/sub/mul/arith (все вариации ключей поддержаны через _extract*)
     if (kind == 'arith' || kind == 'add' || kind == 'sub' || kind == 'mul') {
       final a = _toIntSafe(p['a']);
       final b = _toIntSafe(p['b']);
+      
+      // Если хотя бы одно число нулевое AND это подозрительно — debug-info.
+      if (a == 0 && b == 0) {
+        return _DebugInfoBlock(payload: p, reason: 'ZERO_OPERANDS_DETECTED kind=$kind');
+      }
+      
       String symbol;
       if (kind == 'mul' || (kind == 'arith' && op == 'mul')) {
         symbol = '×';
@@ -471,28 +515,37 @@ class _ConditionCard extends StatelessWidget {
         symbol = '+';
       }
       
-      // Если хотя бы одно число нулевое AND это подозрительно — показываем debug-info.
-      if ((a == 0 && b == 0) || (a == 0 && kind != 'sub')) {
-        return _DebugInfoBlock(payload: p, reason: 'zero_operands_detected');
-      }
-      
       return _BigEquation(left: '$a $symbol $b');
     }
 
     // СРАВНЕНИЕ ДРОБЕЙ
     if (kind == 'compare_frac') {
+      // Поддерживаем обе схемы именования полей.
+      final leftNum = _toIntSafe(p['left_num'] ?? p['frac_left_numer'] ?? p['lnumer']);
+      final rightNum = _toIntSafe(p['right_num'] ?? p['frac_right_numer'] ?? p['rnumer']);
+      final den = _toIntSafe(p['den'] ?? p['denominator'] ?? p['common_den'], 4);
+      
+      if (leftNum == 0 && rightNum == 0 && den <= 1) {
+        return _DebugInfoBlock(payload: p, reason: 'COMPARE_FRAC_ZERO_VALUES');
+      }
+      
       return _FractionCompareRow(
-        leftNum: _toIntSafe(p['left_num']),
-        rightNum: _toIntSafe(p['right_num']),
-        den: _toIntSafe(p['den'], 4),
+        leftNum: leftNum,
+        rightNum: rightNum,
+        den: den,
       );
     }
 
     // СОСТАВ ЧИСЛА (Лес Счёта)
     if (kind == 'compose') {
-      final total = _toIntSafe(p['total'], 10);
-      final given = _toIntSafe(p['given']);
+      final total = _toIntSafe(p['total'] ?? p['sum'], 10);
+      final given = _toIntSafe(p['given'] ?? p['part']);
       final need = (total - given).clamp(0, total);
+      
+      if (total == 0) {
+        return _DebugInfoBlock(payload: p, reason: 'COMPOSE_TOTAL_IS_ZERO');
+      }
+      
       return Column(
         children: [
           Text('🌰 Досыпь до $total',
@@ -506,8 +559,13 @@ class _ConditionCard extends StatelessWidget {
 
     // ЗАКРАШИВАНИЕ ДОЛЕЙ (Фракции Хаоса)
     if (kind == 'shade_frac') {
-      final parts = _toIntSafe(p['parts'], 8);
-      final need = _toIntSafe(p['need'], 1);
+      final parts = _toIntSafe(p['parts'] ?? p['denominator'], 8);
+      final need = _toIntSafe(p['need'] ?? p['numerator'], 1);
+      
+      if (parts == 0 || need == 0) {
+        return _DebugInfoBlock(payload: p, reason: 'SHADE_FRAC_ZERO_PARTS_OR_NEED');
+      }
+      
       return Column(
         children: [
           Text('🍕 Закрась $need из $parts',
@@ -525,7 +583,8 @@ class _ConditionCard extends StatelessWidget {
     }
 
     // FALLBACK: ВИЗУАЛЬНЫЙ ДЕБАГГЕР (показывает реальный JSON payload).
-    return _DebugInfoBlock(payload: p, reason: 'unknown_kind_$kind');
+    // Этот блок теперь гарантированно виден при любой нераспознанной схеме.
+    return _DebugInfoBlock(payload: p, reason: 'UNRECOGNIZED_SCHEMA kind="$kind"');
   }
 }
 
@@ -537,7 +596,6 @@ class _DebugInfoBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Pretty-print JSON с сортировкой ключей для стабильности вывода.
     String dumped;
     try {
       final sorted = Map<String, dynamic>.fromEntries(
@@ -565,22 +623,22 @@ class _DebugInfoBlock extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'DEBUG INFO ($reason)',
+                  'DEBUG ($reason)',
                   style: const TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: FontWeight.w800,
                       color: Colors.orangeAccent,
-                      letterSpacing: 0.5),
+                      letterSpacing: 0.3),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           SelectableText(
             dumped,
-            maxLines: 12,
+            maxLines: 15,
             style: const TextStyle(
-                fontFamily: 'monospace', fontSize: 11, color: Colors.white70, height: 1.3),
+                fontFamily: 'monospace', fontSize: 10, color: Colors.white70, height: 1.25),
           ),
         ],
       ),
@@ -732,12 +790,15 @@ class _InputArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Выбираем механику ввода СТРОГО по полю task.mechanic (серверная правда),
+    // а не по kind из payload. Это устраняет главный источник рассинхрона.
     switch (task.mechanic) {
       case Mechanics.choice:
         final opts = (task.payload['options'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[];
         return ChoiceInput(options: opts, enabled: enabled, onSubmit: onSubmit);
       case Mechanics.drag:
       case Mechanics.shade:
+        // Эти механики появятся в P8/P9; сейчас временно перенаправляем на keypad.
         return KeypadInput(enabled: enabled, onSubmit: onSubmit);
       case Mechanics.keypad:
       default:
