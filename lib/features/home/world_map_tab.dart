@@ -6,15 +6,12 @@ import '../../models/family_models.dart';
 import '../../widgets/common.dart';
 import '../quest/quest_screen.dart';
 
-/// Карта 5 миров. В part9 играбельны острова с механиками choice/keypad;
-/// Лес (перетаскивание) и Фракции (закрашивание) откроются в part10.
+/// Карта 5 миров. Все острова активны после part10.
 class WorldMapTab extends StatelessWidget {
   const WorldMapTab({super.key, required this.kid});
   final ChildProfile kid;
 
-  static const _builtNow = <String>{'bridge', 'cave', 'clock'};
-
-  bool _playable(WorldInfo w) => _builtNow.contains(w.id) && w.fitsGrade(kid.grade);
+  bool _playable(WorldInfo w) => w.fitsGrade(kid.grade);
 
   void _open(BuildContext context, WorldInfo w) {
     if (_playable(w)) {
@@ -26,8 +23,7 @@ class WorldMapTab extends StatelessWidget {
       showScivoDialog(
         context,
         text: '${w.emoji} ${w.title}\n\n'
-            'Этот остров ещё строится! Гномы-строители закончат его совсем '
-            'скоро — и мы полетим туда вместе.',
+            'Этот остров пока недоступен для твоего класса. Попробуй другой!',
         button: 'Жду!',
       );
     }
@@ -151,7 +147,7 @@ class _WorldCard extends StatelessWidget {
                         if (playable)
                           const _Badge(text: 'Играть ▶', highlight: true)
                         else
-                          const _Badge(text: 'Скоро 🛠️'),
+                          const _Badge(text: 'Недоступен'),
                       ],
                     ),
                   ],

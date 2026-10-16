@@ -9,6 +9,8 @@ import '../../widgets/common.dart';
 import '../../widgets/scivo_raven.dart';
 import 'mechanics/choice_input.dart';
 import 'mechanics/keypad_input.dart';
+import 'mechanics/drag_input.dart';
+import 'mechanics/shade_input.dart';
 import 'task_visual.dart';
 
 /// Экран квеста: выдаёт задачу с сервера, принимает ответ, показывает
@@ -66,8 +68,6 @@ class _QuestScreenState extends ConsumerState<QuestScreen> {
           ? ErrorView(message: state.error!, onRetry: _load)
           : const Center(child: CircularProgressIndicator());
     } else {
-      final supported =
-          task.mechanic == Mechanics.choice || task.mechanic == Mechanics.keypad;
       body = Column(
         children: [
           Expanded(
@@ -100,27 +100,25 @@ class _QuestScreenState extends ConsumerState<QuestScreen> {
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
             child: solved
                 ? _SolvedPanel(result: state.lastResult!, onNext: _load)
-                : !supported
-                    ? _UnsupportedPanel(onAnother: _load)
-                    : Column(
-                        children: [
-                          _InputFor(
-                            task: task,
-                            enabled: !state.isLoading,
-                            onSubmit: _submit,
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed:
-                                  (state.isLoading || state.hintLevel >= 3) ? null : _hint,
-                              icon: const Icon(Icons.lightbulb_outline_rounded),
-                              label: Text('Подсказка · 5 ✨ (${state.hintLevel}/3)'),
-                            ),
-                          ),
-                        ],
+                : Column(
+                    children: [
+                      _InputFor(
+                        task: task,
+                        enabled: !state.isLoading,
+                        onSubmit: _submit,
                       ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed:
+                              (state.isLoading || state.hintLevel >= 3) ? null : _hint,
+                          icon: const Icon(Icons.lightbulb_outline_rounded),
+                          label: Text('Подсказка · 5 ✨ (${state.hintLevel}/3)'),
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         ],
       );
@@ -158,12 +156,30 @@ class _InputFor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (task.mechanic == Mechanics.choice) {
-      final opts =
-          (task.payload['options'] as List?)?.cast<String>() ?? const <String>[];
-      return ChoiceInput(options: opts, enabled: enabled, onSubmit: onSubmit);
+    final kind = task.payload['kind']?.toString() ?? '';
+    switch (kind) {
+      case 'compose':
+        return DragInput(
+          total: (task.payload['total'] as num?)?.toInt() ?? 10,
+          given: (task.payload['given'] as num?)?.toInt() ?? 0,
+          enabled: enabled,
+          onSubmit: onSubmit,
+        );
+      case 'shade_frac':
+        return ShadeInput(
+          parts: (task.payload['parts'] as num?)?.toInt() ?? 8,
+          need: (task.payload['need'] as num?)?.toInt() ?? 1,
+          enabled: enabled,
+          onSubmit: onSubmit,
+        );
+      case 'mul':
+      case 'read_clock':
+      case 'compare_frac':
+        final opts = (task.payload['options'] as List?)?.cast<String>() ?? const <String>[];
+        return ChoiceInput(options: opts, enabled: enabled, onSubmit: onSubmit);
+      default: // arith
+        return KeypadInput(enabled: enabled, onSubmit: onSubmit);
     }
-    return KeypadInput(enabled: enabled, onSubmit: onSubmit);
   }
 }
 
@@ -201,7 +217,7 @@ class _SolvedPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = result.reward;
     final parts = <String>[];
-    if (r.feather > 0) parts.add('+${r.feather} 🪶');
+    if (r.feather > 0) parts.add('+${r.feather} ');
     if (r.mana > 0) parts.add('+${r.mana} ✨');
     if (r.xp > 0) parts.add('+${r.xp} ⭐');
     final flavor = result.feedbackKey == 'success_clean'
@@ -232,30 +248,4 @@ class _SolvedPanel extends StatelessWidget {
       ),
     );
   }
-}
-
-class _UnsupportedPanel extends StatelessWidget {
-  const _UnsupportedPanel({required this.onAnother});
-  final VoidCallback onAnother;
-
-  @override
-  Widget build(BuildContext context) => MagicCard(
-        child: Column(
-          children: [
-            const Text('🛠️', style: TextStyle(fontSize: 40)),
-            const SizedBox(height: 8),
-            const Text(
-              'Этот тип задания достраивают гномы. Давай другой!',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                  onPressed: onAnother, child: const Text('Другая задача')),
-            ),
-          ],
-        ),
-      );
 }
