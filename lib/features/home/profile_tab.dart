@@ -9,6 +9,7 @@ import '../family/add_child_screen.dart';
 import 'edit_child_screen.dart';
 
 /// Вкладка профиля ребёнка с кнопкой редактирования.
+/// Сам читает активного героя и список детей через провайдеры (без внешних аргументов).
 class ProfileTab extends ConsumerWidget {
   const ProfileTab({super.key});
 
@@ -16,6 +17,8 @@ class ProfileTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final kid = ref.watch(activeChildProvider);
     if (kid == null) return const Center(child: CircularProgressIndicator());
+
+    final childrenAsync = ref.watch(childrenProvider);
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -25,8 +28,9 @@ class ProfileTab extends ConsumerWidget {
             children: [
               CircleAvatar(
                 radius: 60,
-                backgroundImage: AssetImage('assets/art/${kid.avatarId}.png'),
                 backgroundColor: AppColors.purpleLight,
+                child: Text(kid.nickname.substring(0, 1).toUpperCase(),
+                    style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900)),
               ),
               const SizedBox(height: 16),
               Text(kid.nickname, style: Theme.of(context).textTheme.headlineSmall),
@@ -51,17 +55,26 @@ class ProfileTab extends ConsumerWidget {
         const SizedBox(height: 24),
         Text('Семейные герои', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 16),
-        ...ref.watch(childrenProvider).when(
-          loading: () => const LinearProgressIndicator(),
-          error: (e, _) => Text('Ошибка загрузки: $e'),
+        // ИСПРАВЛЕНО: каждая ветка when(...) возвращает Iterable<Widget>,
+        // поэтому одиночные виджеты оборачиваем в [...].
+        ...childrenAsync.when<List<Widget>>(
+          loading: () => [const LinearProgressIndicator()],
+          error: (e, _) => [Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('Ошибка загрузки: $e',
+                style: const TextStyle(color: Colors.redAccent)),
+          )],
           data: (children) => children.map((c) => ListTile(
             leading: CircleAvatar(
-              backgroundImage: AssetImage('assets/art/${c.avatarId}.png'),
               backgroundColor: c.id == kid.id ? AppColors.gold : AppColors.purpleLight,
+              child: Text(c.nickname.substring(0, 1).toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w900)),
             ),
             title: Text(c.nickname),
             subtitle: Text('${c.grade} класс'),
-            trailing: c.id == kid.id ? const Icon(Icons.check_circle_rounded, color: AppColors.gold) : null,
+            trailing: c.id == kid.id
+                ? const Icon(Icons.check_circle_rounded, color: AppColors.gold)
+                : null,
             onTap: () {
               if (c.id != kid.id) {
                 ref.read(activeChildProvider.notifier).state = c;
@@ -74,16 +87,11 @@ class ProfileTab extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
         ElevatedButton.icon(
-          onPressed: () => showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            builder: (_) => DraggableScrollableSheet(
-              initialChildSize: 0.9,
-              minChildSize: 0.5,
-              maxChildSize: 0.95,
-              expand: false,
-              builder: (_, controller) => AddChildScreen(scrollController: controller),
-            ),
+          // ИСПРАВЛЕНО: AddChildScreen не имеет параметра scrollController,
+          // вызываем без аргументов (isFirst=false по умолчанию).
+          onPressed: () => Navigator.push<void>(
+            context,
+            MaterialPageRoute(builder: (_) => const AddChildScreen()),
           ),
           icon: const Icon(Icons.person_add_alt_1_rounded),
           label: const Text('Добавить нового героя'),
