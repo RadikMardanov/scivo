@@ -1,70 +1,76 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// Цветовая палитра Scivo (ночь, золото, фиолет).
 class AppColors {
-  AppColors._();
-
-  static const purple = Color(0xFF7248D8);
-  static const purpleLight = Color(0xFF9B7BFF);
+  static const nightBg = Color(0xFF0F0E1A);
+  static const nightCard = Color(0xFF1C1B2E);
+  static const purpleLight = Color(0xFF8B7FD4);
   static const gold = Color(0xFFFFD700);
-  static const flame = Color(0xFFFF9F43);
-  static const night = Color(0xFF1B1F4B);
-  static const nightCard = Color(0xFF2A2F6B);
-  static const textDark = Color(0xFF12142E);
-  static const success = Color(0xFF4ADE80);
-  static const danger = Color(0xFFFF6B6B);
-
-  static const nightGradient = LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [Color(0xFF2E2177), night, Color(0xFF0F1230)],
-  );
+  static const textDark = Color(0xFF1A1A2E);
+  static const successGreen = Color(0xFF4CAF50);
+  static const errorRed = Color(0xFFF44336);
 }
 
-class AppTheme {
-  AppTheme._();
+/// Градиент ночного фона.
+final LinearGradient nightGradient = LinearGradient(
+  begin: Alignment.topCenter,
+  end: Alignment.bottomCenter,
+  colors: [AppColors.nightBg, const Color(0xFF1A1830)],
+);
 
-  static ThemeData dark() {
-    final base = ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.purple,
-        brightness: Brightness.dark,
-      ).copyWith(
-        primary: AppColors.purple,
-        secondary: AppColors.gold,
+class AppTheme {
+  static ThemeData build() {
+    final base = ThemeData.dark(useMaterial3: true);
+    return base.copyWith(
+      scaffoldBackgroundColor: Colors.transparent,
+      colorScheme: base.colorScheme.copyWith(
+        primary: AppColors.gold,
+        secondary: AppColors.purpleLight,
         surface: AppColors.nightCard,
       ),
-    );
-
-    final textTheme = GoogleFonts.nunitoTextTheme(base.textTheme).apply(
-      bodyColor: Colors.white,
-      displayColor: Colors.white,
-    );
-
-    return base.copyWith(
-      scaffoldBackgroundColor: AppColors.night,
-      textTheme: textTheme,
+      textTheme: GoogleFonts.nunitoTextTheme(base.textTheme).apply(
+        bodyColor: Colors.white,
+        displayColor: Colors.white,
+      ),
+      appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.gold,
+          foregroundColor: AppColors.textDark,
+          minimumSize: const Size(double.infinity, 56),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+        ),
+      ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: AppColors.purple,
+          backgroundColor: AppColors.purpleLight,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: AppColors.purple.withValues(alpha: 0.4),
-          minimumSize: const Size(120, 56),
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-          textStyle: GoogleFonts.nunito(fontSize: 19, fontWeight: FontWeight.w800),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          minimumSize: const Size(double.infinity, 56),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.white,
-          minimumSize: const Size(120, 56),
           side: const BorderSide(color: AppColors.purpleLight, width: 2),
-          textStyle: GoogleFonts.nunito(fontSize: 18, fontWeight: FontWeight.w700),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          foregroundColor: Colors.white,
+          minimumSize: const Size(double.infinity, 56),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
         ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white.withValues(alpha: 0.1),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.gold, width: 2),
+        ),
+        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+        labelStyle: const TextStyle(color: AppColors.gold, fontWeight: FontWeight.w700),
       ),
     );
   }

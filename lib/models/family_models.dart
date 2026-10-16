@@ -1,28 +1,34 @@
-int _asInt(dynamic value) => (value as num?)?.toInt() ?? 0;
+import 'package:flutter/foundation.dart';
 
+@immutable
 class ParentProfile {
   const ParentProfile({
     required this.id,
+    required this.displayName,
     required this.hasPin,
-    required this.hasConsent,
-    this.displayName,
+    required this.consentAt,
   });
 
   final String id;
+  final String displayName;
   final bool hasPin;
-  final bool hasConsent;
-  final String? displayName;
+  final DateTime? consentAt;
+
+  bool get hasConsent => consentAt != null;
 
   factory ParentProfile.fromJson(Map<String, dynamic> json) {
     return ParentProfile(
-      id: json['id'] as String,
+      id: json['id'].toString(),
+      displayName: json['display_name']?.toString() ?? '',
       hasPin: json['has_pin'] == true,
-      hasConsent: json['consent_at'] != null,
-      displayName: json['display_name'] as String?,
+      consentAt: json['consent_at'] != null
+          ? DateTime.tryParse(json['consent_at'].toString())
+          : null,
     );
   }
 }
 
+@immutable
 class ChildProfile {
   const ChildProfile({
     required this.id,
@@ -40,69 +46,56 @@ class ChildProfile {
   final bool onboardingDone;
   final int dailyFeatherCap;
 
-  ChildProfile copyWith({bool? onboardingDone}) {
-    return ChildProfile(
-      id: id,
-      nickname: nickname,
-      avatarId: avatarId,
-      grade: grade,
-      onboardingDone: onboardingDone ?? this.onboardingDone,
-      dailyFeatherCap: dailyFeatherCap,
-    );
-  }
-
   factory ChildProfile.fromJson(Map<String, dynamic> json) {
     return ChildProfile(
-      id: json['id'] as String,
-      nickname: json['nickname'] as String? ?? 'Герой',
-      avatarId: json['avatar_id'] as String? ?? 'raven_blue',
-      grade: _asInt(json['grade']),
+      id: json['id'].toString(),
+      nickname: json['nickname']?.toString() ?? '',
+      avatarId: json['avatar_id']?.toString() ?? 'raven_blue',
+      grade: (json['grade'] as num?)?.toInt() ?? 1,
       onboardingDone: json['onboarding_done'] == true,
-      dailyFeatherCap: _asInt(json['daily_feather_cap']),
+      dailyFeatherCap: (json['daily_feather_cap'] as num?)?.toInt() ?? 5,
     );
   }
 }
 
+@immutable
 class ChildProgress {
   const ChildProgress({
     required this.feathers,
-    required this.feathersFrozen,
     required this.mana,
     required this.xp,
     required this.streakDays,
-    required this.streakFreezes,
+    required this.lastCheckinDate,
   });
 
   final int feathers;
-  final int feathersFrozen;
   final int mana;
   final int xp;
   final int streakDays;
-  final int streakFreezes;
-
-  int get availableFeathers => feathers - feathersFrozen;
+  final DateTime? lastCheckinDate;
 
   static const empty = ChildProgress(
     feathers: 0,
-    feathersFrozen: 0,
     mana: 0,
     xp: 0,
     streakDays: 0,
-    streakFreezes: 0,
+    lastCheckinDate: null,
   );
 
   factory ChildProgress.fromJson(Map<String, dynamic> json) {
     return ChildProgress(
-      feathers: _asInt(json['feathers']),
-      feathersFrozen: _asInt(json['feathers_frozen']),
-      mana: _asInt(json['mana']),
-      xp: _asInt(json['xp']),
-      streakDays: _asInt(json['streak_days']),
-      streakFreezes: _asInt(json['streak_freezes']),
+      feathers: (json['feathers'] as num?)?.toInt() ?? 0,
+      mana: (json['mana'] as num?)?.toInt() ?? 0,
+      xp: (json['xp'] as num?)?.toInt() ?? 0,
+      streakDays: (json['streak_days'] as num?)?.toInt() ?? 0,
+      lastCheckinDate: json['last_checkin_date'] != null
+          ? DateTime.tryParse(json['last_checkin_date'].toString())
+          : null,
     );
   }
 }
 
+@immutable
 class CheckinResult {
   const CheckinResult({
     required this.progress,
@@ -115,42 +108,22 @@ class CheckinResult {
   final bool usedFreeze;
 }
 
+@immutable
 class PinCheckResult {
-  const PinCheckResult({
-    required this.ok,
-    this.reason,
-    this.attemptsLeft,
-    this.lockSeconds,
-  });
+  const PinCheckResult({required this.ok, required this.message});
 
   final bool ok;
-  final String? reason;
-  final int? attemptsLeft;
-  final int? lockSeconds;
+  final String message;
 
   factory PinCheckResult.fromJson(Map<String, dynamic> json) {
     return PinCheckResult(
       ok: json['ok'] == true,
-      reason: json['reason'] as String?,
-      attemptsLeft: (json['attempts_left'] as num?)?.toInt(),
-      lockSeconds: (json['seconds'] as num?)?.toInt(),
+      message: json['message']?.toString() ?? '',
     );
-  }
-
-  String get message {
-    switch (reason) {
-      case 'locked':
-        return 'Слишком много попыток. Подождите ${lockSeconds ?? 60} сек.';
-      case 'no_pin':
-        return 'PIN родителя ещё не задан.';
-      default:
-        final left = attemptsLeft;
-        if (left != null) return 'Неверный PIN. Осталось попыток: $left';
-        return 'Неверный PIN.';
-    }
   }
 }
 
+@immutable
 class WishlistItem {
   const WishlistItem({
     required this.id,
@@ -166,10 +139,10 @@ class WishlistItem {
 
   factory WishlistItem.fromJson(Map<String, dynamic> json) {
     return WishlistItem(
-      id: json['id'] as String,
-      title: json['title'] as String? ?? 'Приз',
-      featherCost: _asInt(json['feather_cost']),
-      emoji: json['emoji'] as String? ?? '🎁',
+      id: json['id'].toString(),
+      title: json['title']?.toString() ?? '',
+      featherCost: (json['feather_cost'] as num?)?.toInt() ?? 0,
+      emoji: json['emoji']?.toString() ?? '🎁',
     );
   }
 }
