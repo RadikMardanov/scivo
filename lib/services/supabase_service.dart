@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/errors.dart';
@@ -139,11 +141,15 @@ class SupabaseService {
 
   // ---------- Задания (миграция 002) ----------
   /// Выдаёт новую задачу по миру. Ответ на клиент не приходит.
+  /// HOTFIX 002e: явно сериализуем params в JSON через jsonEncode/jsonDecode,
+  /// чтобы supabase_flutter гарантированно отправил их серверу как объект.
   Future<GeneratedTask> generateTask(String childId, String worldId) async {
-    final raw = await _client.rpc('generate_task', params: {
+    final paramsJson = jsonEncode({
       'p_child_id': childId,
       'p_world_id': worldId,
     });
+    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
+    final raw = await _client.rpc('generate_task', params: params);
     return GeneratedTask.fromJson(_asMap(raw));
   }
 
@@ -153,21 +159,25 @@ class SupabaseService {
     String taskId,
     Map<String, dynamic> input,
   ) async {
-    final raw = await _client.rpc('submit_answer', params: {
+    final paramsJson = jsonEncode({
       'p_child_id': childId,
       'p_task_id': taskId,
       'p_input': input,
     });
+    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
+    final raw = await _client.rpc('submit_answer', params: params);
     return SubmitResult.fromJson(_asMap(raw));
   }
 
   /// Просит подсказку уровня 1..3 (тратит ману на сервере).
   Future<HintResult> requestHint(String childId, String taskId, int level) async {
-    final raw = await _client.rpc('request_hint', params: {
+    final paramsJson = jsonEncode({
       'p_child_id': childId,
       'p_task_id': taskId,
       'p_level': level,
     });
+    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
+    final raw = await _client.rpc('request_hint', params: params);
     return HintResult.fromJson(_asMap(raw));
   }
 
