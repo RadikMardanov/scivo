@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/errors.dart';
+import '../data/tasks.dart';
 import '../models/family_models.dart';
 
 class SupabaseService {
@@ -52,21 +53,24 @@ class SupabaseService {
   }
 
   Future<void> setParentPin(String pin) async {
-    final result = await _client.rpc('set_parent_pin', params: {'p_new_pin': pin});
-    final check = PinCheckResult.fromJson(Map<String, dynamic>.from(result as Map));
+    final result =
+        await _client.rpc('set_parent_pin', params: {'p_new_pin': pin});
+    final check = PinCheckResult.fromJson(_asMap(result));
     if (!check.ok) throw AppException(check.message);
   }
 
   Future<PinCheckResult> verifyParentPin(String pin) async {
-    final result = await _client.rpc('verify_parent_pin', params: {'p_pin': pin});
-    return PinCheckResult.fromJson(Map<String, dynamic>.from(result as Map));
+    final result =
+        await _client.rpc('verify_parent_pin', params: {'p_pin': pin});
+    return PinCheckResult.fromJson(_asMap(result));
   }
 
   // ---------- Дети ----------
   Future<List<ChildProfile>> fetchChildren() async {
     final rows = await _client
         .from('children')
-        .select('id, nickname, avatar_id, grade, onboarding_done, daily_feather_cap')
+        .select(
+            'id, nickname, avatar_id, grade, onboarding_done, daily_feather_cap')
         .order('created_at');
     return rows.map((row) => ChildProfile.fromJson(row)).toList();
   }
@@ -91,7 +95,7 @@ class SupabaseService {
       'p_child_id': childId,
       'p_pin': pin,
     });
-    return PinCheckResult.fromJson(Map<String, dynamic>.from(result as Map));
+    return PinCheckResult.fromJson(_asMap(result));
   }
 
   // ---------- Прогресс ----------
@@ -105,18 +109,21 @@ class SupabaseService {
   }
 
   Future<CheckinResult> checkin(String childId) async {
-    final raw = await _client.rpc('child_checkin', params: {'p_child_id': childId});
-    final result = Map<String, dynamic>.from(raw as Map);
+    final raw =
+        await _client.rpc('child_checkin', params: {'p_child_id': childId});
+    final result = _asMap(raw);
     return CheckinResult(
-      progress: ChildProgress.fromJson(Map<String, dynamic>.from(result['progress'] as Map)),
+      progress:
+          ChildProgress.fromJson(_asMap(result['progress'] as Map? ?? const {})),
       manaBonus: (result['mana_bonus'] as num?)?.toInt() ?? 0,
       usedFreeze: result['used_freeze'] == true,
     );
   }
 
   Future<int> completeOnboarding(String childId) async {
-    final raw = await _client.rpc('complete_onboarding', params: {'p_child_id': childId});
-    final result = Map<String, dynamic>.from(raw as Map);
+    final raw = await _client
+        .rpc('complete_onboarding', params: {'p_child_id': childId});
+    final result = _asMap(raw);
     return (result['mana_bonus'] as num?)?.toInt() ?? 0;
   }
 
@@ -129,4 +136,41 @@ class SupabaseService {
         .order('feather_cost');
     return rows.map((row) => WishlistItem.fromJson(row)).toList();
   }
+
+  // ---------- Задания (миграция 002) ----------
+  /// Выдаёт новую задачу по миру. Ответ на клиент не приходит.
+  Future<GeneratedTask> generateTask(String childId, String worldId) async {
+    final raw = await _client.rpc('generate_task', params: {
+      'p_child_id': childId,
+      'p_world_id': worldId,
+    });
+    return GeneratedTask.fromJson(_asMap(raw));
+  }
+
+  /// Отправляет ответ на сервер; сервер решает, верно ли, и начисляет награды.
+  Future<SubmitResult> submitAnswer(
+    String childId,
+    String taskId,
+    Map<String, dynamic> input,
+  ) async {
+    final raw = await _client.rpc('submit_answer', params: {
+      'p_child_id': childId,
+      'p_task_id': taskId,
+      'p_input': input,
+    });
+    return SubmitResult.fromJson(_asMap(raw));
+  }
+
+  /// Просит подсказку уровня 1..3 (тратит ману на сервере).
+  Future<HintResult> requestHint(String childId, String taskId, int level) async {
+    final raw = await _client.rpc('request_hint', params: {
+      'p_child_id': childId,
+      'p_task_id': taskId,
+      'p_level': level,
+    });
+    return HintResult.fromJson(_asMap(raw));
+  }
+
+  Map<String, dynamic> _asMap(dynamic value) =>
+      Map<String, dynamic>.from(value as Map? ?? const {});
 }
