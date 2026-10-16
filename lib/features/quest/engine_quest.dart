@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -60,7 +61,6 @@ class QuestSnapshot {
   static const initial = QuestSnapshot(phase: QuestPhase.idle);
 }
 
-// DIAG_Q: печатаем каждый переход FSM для удалённой диагностики.
 void _diag(String tag, [String? detail]) {
   // ignore: avoid_print
   print('DIAG_Q [$tag] ${detail ?? ''}');
@@ -265,9 +265,6 @@ class _QuestScreenState extends ConsumerState<QuestScreen> {
   }
 }
 
-/// ИСПРАВЛЕНО (P4b-fix): был StatelessWidget, стал ConsumerWidget.
-/// Теперь метод build получает WidgetRef ref, и все обращения к
-/// questEngineProvider работают корректно.
 class _ReadyBody extends ConsumerWidget {
   const _ReadyBody({
     required this.snapshot,
@@ -366,12 +363,13 @@ class _ReadyBody extends ConsumerWidget {
 
   String _promptText(GeneratedTask t) {
     final p = t.payload;
-    final kind = (p['kind']?.toString() ?? '').toLowerCase();
+    // ИСПРАВЛЕНО (P5): поддерживаем оба варианта имени поля типа задачи.
+    final kind = _extractKind(p).toLowerCase();
     switch (kind) {
       case 'mul':
         return 'Кар! Умножай быстро — дракон ждёт!';
       case 'arith':
-        return (p['op']?.toString()?.toLowerCase() == 'sub')
+        return (_extractOp(p).toLowerCase() == 'sub')
             ? 'Вычитай без страха!'
             : 'Складывай смелее!';
       case 'add':
@@ -392,18 +390,55 @@ class _ReadyBody extends ConsumerWidget {
   }
 }
 
-/// Карточка с УСЛОВИЕМ задачи. Рисует числа/дроби/часы прямо из payload.
+/// Извлекает тип задачи из payload, учитывая разные схемы именования.
+String _extractKind(Map<String, dynamic> p) {
+  // Приоритет 1: поле 'kind' (стандарт миграции 002i/j/k)
+  var v = p['kind'];
+  if (v != null && v.toString().isNotEmpty) return v.toString();
+  
+  // Приоритет 2: поле 'type' (альтернативное имя, встречается в ранних версиях)
+  v = p['type'];
+  if (v != null && v.toString().isNotEmpty) return v.toString();
+  
+  // Приоритет 3: эвристика по наличию полей a+b+op → arith
+  if (p.containsKey('a') && p.containsKey('b')) {
+    if (p.containsKey('options')) return 'mul';
+    return 'arith';
+  }
+  
+  return '';
+}
+
+/// Извлекает операцию из payload, учитывая разные схемы именования.
+String _extractOp(Map<String, dynamic> p) {
+  var v = p['op'];
+  if (v != null && v.toString().isNotEmpty) return v.toString();
+  
+  v = p['operation'];
+  if (v != null && v.toString().isNotEmpty) return v.toString();
+  
+  // Дефолт для арифметики без явного указания операции
+  return 'add';
+}
+
+/// Безопасное приведение значения к int (работает с числами и строками).
+int _toIntSafe(dynamic v, [int d = 0]) {
+  if (v == null) return d;
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v) ?? d;
+  return d;
+}
+
+/// Карточка с УСЛОВИЕМ задачи + встроенный визуальный дебаггер.
 class _ConditionCard extends StatelessWidget {
   const _ConditionCard({required this.task});
   final GeneratedTask task;
-
-  int _i(dynamic v, [int d = 0]) => (v as num?)?.toInt() ?? d;
-  String _s(dynamic v) => v?.toString() ?? '';
 
   @override
   Widget build(BuildContext context) {
     final p = task.payload;
 
+    // Защита от пустого payload.
     if (p.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -413,19 +448,20 @@ class _ConditionCard extends StatelessWidget {
           border: Border.all(color: Colors.redAccent),
         ),
         child: const Text(
-          '⚠️ Данные задания пусты. Нажми «Попробовать снова».',
+          '⚠️ Данные задания пусты.\nНажми «Попробовать снова».',
           textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white, fontSize: 16),
+          style: TextStyle(color: Colors.white, fontSize: 16, height: 1.4),
         ),
       );
     }
 
-    final kind = _s(p['kind']).toLowerCase();
-    final op = _s(p['op']).toLowerCase();
+    final kind = _extractKind(p).toLowerCase();
+    final op = _extractOp(p).toLowerCase();
 
+    // АРИФМЕТИКА: add/sub/mul/arith (все вариации ключей поддержаны через _extract*)
     if (kind == 'arith' || kind == 'add' || kind == 'sub' || kind == 'mul') {
-      final a = _i(p['a']);
-      final b = _i(p['b']);
+      final a = _toIntSafe(p['a']);
+      final b = _toIntSafe(p['b']);
       String symbol;
       if (kind == 'mul' || (kind == 'arith' && op == 'mul')) {
         symbol = '×';
@@ -434,20 +470,28 @@ class _ConditionCard extends StatelessWidget {
       } else {
         symbol = '+';
       }
+      
+      // Если хотя бы одно число нулевое AND это подозрительно — показываем debug-info.
+      if ((a == 0 && b == 0) || (a == 0 && kind != 'sub')) {
+        return _DebugInfoBlock(payload: p, reason: 'zero_operands_detected');
+      }
+      
       return _BigEquation(left: '$a $symbol $b');
     }
 
+    // СРАВНЕНИЕ ДРОБЕЙ
     if (kind == 'compare_frac') {
       return _FractionCompareRow(
-        leftNum: _i(p['left_num']),
-        rightNum: _i(p['right_num']),
-        den: _i(p['den'], 4),
+        leftNum: _toIntSafe(p['left_num']),
+        rightNum: _toIntSafe(p['right_num']),
+        den: _toIntSafe(p['den'], 4),
       );
     }
 
+    // СОСТАВ ЧИСЛА (Лес Счёта)
     if (kind == 'compose') {
-      final total = _i(p['total'], 10);
-      final given = _i(p['given']);
+      final total = _toIntSafe(p['total'], 10);
+      final given = _toIntSafe(p['given']);
       final need = (total - given).clamp(0, total);
       return Column(
         children: [
@@ -460,9 +504,10 @@ class _ConditionCard extends StatelessWidget {
       );
     }
 
+    // ЗАКРАШИВАНИЕ ДОЛЕЙ (Фракции Хаоса)
     if (kind == 'shade_frac') {
-      final parts = _i(p['parts'], 8);
-      final need = _i(p['need'], 1);
+      final parts = _toIntSafe(p['parts'], 8);
+      final need = _toIntSafe(p['need'], 1);
       return Column(
         children: [
           Text('🍕 Закрась $need из $parts',
@@ -474,23 +519,70 @@ class _ConditionCard extends StatelessWidget {
       );
     }
 
+    // ЧАСЫ
     if (kind == 'read_clock') {
-      return _MiniClock(hour: _i(p['hour']), minute: _i(p['minute']));
+      return _MiniClock(hour: _toIntSafe(p['hour']), minute: _toIntSafe(p['minute']));
+    }
+
+    // FALLBACK: ВИЗУАЛЬНЫЙ ДЕБАГГЕР (показывает реальный JSON payload).
+    return _DebugInfoBlock(payload: p, reason: 'unknown_kind_$kind');
+  }
+}
+
+/// Блок с полным dump'ом payload для удалённой диагностики без DevTools.
+class _DebugInfoBlock extends StatelessWidget {
+  const _DebugInfoBlock({required this.payload, required this.reason});
+  final Map<String, dynamic> payload;
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    // Pretty-print JSON с сортировкой ключей для стабильности вывода.
+    String dumped;
+    try {
+      final sorted = Map<String, dynamic>.fromEntries(
+        payload.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+      );
+      dumped = const JsonEncoder.withIndent('  ').convert(sorted);
+    } catch (_) {
+      dumped = payload.toString();
     }
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.nightCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.gold.withValues(alpha: 0.4)),
+        color: Colors.black.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.6)),
       ),
-      child: Text(
-        'Тип задания: ${kind.isEmpty ? '(не указан)' : kind}\n'
-        'Поля: ${p.keys.join(', ')}\n'
-        'Значения: ${p.values.map((v) => v.toString()).join(', ')}',
-        style: const TextStyle(
-            fontSize: 13, color: Colors.orangeAccent, fontFamily: 'monospace'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bug_report_rounded, size: 18, color: Colors.orangeAccent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'DEBUG INFO ($reason)',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.orangeAccent,
+                      letterSpacing: 0.5),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SelectableText(
+            dumped,
+            maxLines: 12,
+            style: const TextStyle(
+                fontFamily: 'monospace', fontSize: 11, color: Colors.white70, height: 1.3),
+          ),
+        ],
       ),
     );
   }
