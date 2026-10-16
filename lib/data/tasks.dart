@@ -25,13 +25,50 @@ class GeneratedTask {
   final Map<String, dynamic> payload;
 
   factory GeneratedTask.fromJson(Map<String, dynamic> json) {
+    // DIAG_BRIDGE [PARSER]: логируем сырой ответ сервера перед парсингом.
+    try {
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [PARSER] raw_json_keys=${json.keys.toList()}');
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [PARSER] raw_payload_type=${json['payload'].runtimeType}');
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [PARSER] raw_payload_value=${json['payload']}');
+    } catch (_) {/* safety */}
+
+    // ИСПРАВЛЕНО (R-05): надёжное извлечение payload.
+    // Supabase может вернуть payload как Map<dynamic,dynamic>, LinkedHashMap,
+    // _JsonMap или даже null при ошибке десериализации. Приводим ко всему,
+    // что похоже на словарь, иначе — пустой map.
+    Map<String, dynamic> safePayload;
+    final raw = json['payload'];
+    if (raw is Map) {
+      safePayload = Map<String, dynamic>.from(raw);
+    } else if (raw is String && raw.isNotEmpty) {
+      // На случай двойного JSON-кодирования (редко, но бывает).
+      try {
+        final decoded = Uri.decodeComponent(raw);
+        safePayload = <String, dynamic>{'__raw_string__': decoded};
+      } catch (_) {
+        safePayload = <String, dynamic>{'__raw_string__': raw};
+      }
+    } else {
+      safePayload = <String, dynamic>{};
+    }
+
+    // DIAG_BRIDGE [PARSER]: логируем итоговый payload после приведения.
+    try {
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [PARSER] parsed_payload_keys=${safePayload.keys.toList()}');
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [PARSER] parsed_payload=$safePayload');
+    } catch (_) {/* safety */}
+
     return GeneratedTask(
-      taskId: json['task_id'].toString(),
-      worldId: json['world_id'].toString(),
-      mechanic: json['mechanic'].toString(),
+      taskId: json['task_id']?.toString() ?? '',
+      worldId: json['world_id']?.toString() ?? '',
+      mechanic: json['mechanic']?.toString() ?? Mechanics.keypad,
       difficulty: (json['difficulty'] as num?)?.toInt() ?? 1,
-      // ИСПРАВЛЕНО: читаем payload из JSON (был потерян при парсинге)
-      payload: Map<String, dynamic>.from(json['payload'] as Map? ?? const {}),
+      payload: safePayload,
     );
   }
 }

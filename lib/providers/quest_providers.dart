@@ -1,99 +1,110 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/errors.dart';
 import '../data/tasks.dart';
 import '../services/supabase_service.dart';
 import 'app_providers.dart';
 
-/// Состояние активного квеста: одна задача + последняя проверка + подсказки.
+/// Состояние экрана квеста: текущая задача, результат последней попытки,
+/// уровень использованных подсказок, статус загрузки, текст ошибки.
 class QuestState {
   const QuestState({
     this.task,
+    this.lastResult,
+    this.lastHint,
+    this.hintLevel = 0,
     this.isLoading = false,
     this.error,
-    this.lastResult,
-    this.hintLevel = 0,
-    this.lastHint,
   });
 
   final GeneratedTask? task;
+  final SubmitResult? lastResult;
+  final HintResult? lastHint;
+  final int hintLevel;
   final bool isLoading;
   final String? error;
-  final SubmitResult? lastResult;
-  final int hintLevel; // сколько подсказок уже открыто по текущей задаче
-  final HintResult? lastHint;
-}
 
-class QuestController extends StateNotifier<QuestState> {
-  QuestController(this._ref) : super(const QuestState());
-
-  final Ref _ref;
-
-  SupabaseService get _service => _ref.read(serviceProvider);
-
-  /// Загружает новую задачу по миру (сбрасывает предыдущее состояние).
-  Future<void> loadTask(String childId, String worldId) async {
-    state = const QuestState(isLoading: true);
-    try {
-      final task = await _service.generateTask(childId, worldId);
-      state = QuestState(task: task);
-    } catch (error) {
-      state = QuestState(error: friendlyError(error));
-    }
-  }
-
-  /// Отправляет ответ; при успехе обновляет прогресс (перья/мана в шапке).
-  Future<void> submit(String childId, Map<String, dynamic> input) async {
-    final task = state.task;
-    if (task == null) return;
-    state = state.copyWith(isLoading: true, clearError: true);
-    try {
-      final result = await _service.submitAnswer(childId, task.taskId, input);
-      state = state.copyWith(isLoading: false, lastResult: result);
-      _ref.invalidate(progressProvider(childId));
-    } catch (error) {
-      state = state.copyWith(isLoading: false, error: friendlyError(error));
-    }
-  }
-
-  /// Запрашивает подсказку уровня 1..3 (один раз на уровень).
-  Future<void> askHint(String childId, int level) async {
-    final task = state.task;
-    if (task == null) return;
-    if (level <= state.hintLevel) return; // этот уровень уже давали
-    try {
-      final hint = await _service.requestHint(childId, task.taskId, level);
-      state = state.copyWith(lastHint: hint, hintLevel: level);
-      _ref.invalidate(progressProvider(childId)); // мана списалась
-    } catch (error) {
-      state = state.copyWith(error: friendlyError(error));
-    }
-  }
-
-  void reset() => state = const QuestState();
-}
-
-final questControllerProvider =
-    StateNotifierProvider<QuestController, QuestState>((ref) {
-  return QuestController(ref);
-});
-
-extension on QuestState {
   QuestState copyWith({
-    bool? isLoading,
-    String? error,
+    GeneratedTask? task,
     SubmitResult? lastResult,
     HintResult? lastHint,
     int? hintLevel,
-    bool clearError = false,
+    bool? isLoading,
+    String? error,
   }) {
     return QuestState(
-      task: task,
-      isLoading: isLoading ?? this.isLoading,
-      error: clearError ? null : (error ?? this.error),
+      task: task ?? this.task,
       lastResult: lastResult ?? this.lastResult,
-      hintLevel: hintLevel ?? this.hintLevel,
       lastHint: lastHint ?? this.lastHint,
+      hintLevel: hintLevel ?? this.hintLevel,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
     );
   }
 }
+
+/// Контроллер квеста: вызывает RPC generate_task / submit_answer / request_hint.
+class QuestController extends StateNotifier<QuestState> {
+  QuestController(this._service) : super(const QuestState());
+
+  final SupabaseService _service;
+
+  Future<void> loadTask(String childId, String worldId) async {
+    state = state.copyWith(
+      isLoading: true,
+      error: null,
+      lastResult: null,
+      lastHint: null,
+      hintLevel: 0,
+    );
+    try {
+      final task = await _service.generateTask(childId, worldId);
+      // DIAG_BRIDGE [CONTROLLER]: фиксируем момент получения задачи контроллером.
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [CONTROLLER] loaded task_id=${task.taskId} world=${task.worldId} mech=${task.mechanic} diff=${task.difficulty}');
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [CONTROLLER] payload_in_controller=${task.payload}');
+      state = state.copyWith(task: task, isLoading: false);
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [CONTROLLER_ERROR] $e\n$st');
+      state = state.copyWith(error: e.toString(), isLoading: false);
+    }
+  }
+
+  Future<void> submit(String childId, Map<String, dynamic> input) async {
+    final task = state.task;
+    if (task == null) return;
+
+    state = state.copyWith(isLoading: true);
+    try {
+      final result = await _service.submitAnswer(childId, task.taskId, input);
+      state = state.copyWith(lastResult: result, isLoading: false);
+    } catch (e) {
+      state = state.copyWith(error: e.toString(), isLoading: false);
+    }
+  }
+
+  Future<void> askHint(String childId, int level) async {
+    final task = state.task;
+    if (task == null) return;
+
+    state = state.copyWith(isLoading: true);
+    try {
+      final hint = await _service.requestHint(childId, task.taskId, level);
+      state = state.copyWith(lastHint: hint, hintLevel: level, isLoading: false);
+    } catch (e) {
+      state = state.copyWith(error: e.toString(), isLoading: false);
+    }
+  }
+
+  void reset() {
+    state = const QuestState();
+  }
+}
+
+/// Провайдер контроллера квеста.
+final questControllerProvider =
+    StateNotifierProvider<QuestController, QuestState>((ref) {
+  final service = ref.read(serviceProvider);
+  return QuestController(service);
+});

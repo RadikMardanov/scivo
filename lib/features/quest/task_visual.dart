@@ -15,16 +15,41 @@ class TaskVisual extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ИСПРАВЛЕНО: читаем kind из payload, если есть; иначе определяем по наличию полей
+    // DIAG_BRIDGE [VISUAL]: логируем то, что реально получил визуализатор.
+    try {
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [VISUAL] payload_keys=${payload.keys.toList()}');
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [VISUAL] kind=${payload['kind']} a=${payload['a']} b=${payload['b']} op=${payload['op']}');
+    } catch (_) {/* safety */}
+
+    // Пустой payload — ранний возврат с понятной заглушкой, без «0+0=?».
+    if (payload.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text(
+            'Задача загружается… 🐦⬛',
+            style: TextStyle(fontSize: 20, color: Colors.white70),
+          ),
+        ),
+      );
+    }
+
     final kind = _s(payload['kind']);
-    
+
+    // Основной путь: dispatch по полю kind.
     if (kind.isNotEmpty) {
       switch (kind) {
         case 'mul':
           return _Equation('${_i(payload['a'])} × ${_i(payload['b'])}');
         case 'arith':
-          final op = _s(payload['op']) == 'sub' ? '−' : '+';
-          return _Equation('${_i(payload['a'])} $op ${_i(payload['b'])}');
+          final opSym = _s(payload['op']).toLowerCase() == 'sub' ? '−' : '+';
+          return _Equation('${_i(payload['a'])} $opSym ${_i(payload['b'])}');
+        case 'add':
+          return _Equation('${_i(payload['a'])} + ${_i(payload['b'])}');
+        case 'sub':
+          return _Equation('${_i(payload['a'])} − ${_i(payload['b'])}');
         case 'read_clock':
           return _ClockFace(hour: _i(payload['hour']), minute: _i(payload['minute']));
         case 'compare_frac':
@@ -34,43 +59,46 @@ class TaskVisual extends StatelessWidget {
             den: _i(payload['den'], 4),
           );
         case 'compose':
-          return _Equation('Досыпь до ${_i(payload['total'])} (уже ${_i(payload['given'])})');
+          return _ComposeHint(total: _i(payload['total'], 10), given: _i(payload['given']));
         case 'shade_frac':
-          return _Equation('Закрась ${_i(payload['need'])} из ${_i(payload['parts'])}');
+          return _ShadeHint(parts: _i(payload['parts'], 8), need: _i(payload['need'], 1));
         default:
-          break; // падаем в fallback ниже
+          break; // падаем в структурный fallback ниже
       }
     }
-    
-    // FALLBACK: если kind отсутствует или неизвестен — определяем тип по структуре данных
+
+    // Структурный fallback: определяем тип по наличию полей, если kind потерян.
     if (payload.containsKey('a') && payload.containsKey('b')) {
-      // Это арифметика (add/sub/mul)
       if (payload.containsKey('options')) {
         return _Equation('${_i(payload['a'])} × ${_i(payload['b'])}');
-      } else {
-        final op = _s(payload['op']) == 'sub' ? '−' : '+';
-        return _Equation('${_i(payload['a'])} $op ${_i(payload['b'])}');
       }
-    } else if (payload.containsKey('hour') && payload.containsKey('minute')) {
+      final opSym = _s(payload['op']).toLowerCase() == 'sub' ? '−' : '+';
+      return _Equation('${_i(payload['a'])} $opSym ${_i(payload['b'])}');
+    }
+    if (payload.containsKey('hour') && payload.containsKey('minute')) {
       return _ClockFace(hour: _i(payload['hour']), minute: _i(payload['minute']));
-    } else if (payload.containsKey('left_num') && payload.containsKey('den')) {
+    }
+    if (payload.containsKey('left_num') && payload.containsKey('den')) {
       return _CompareFractions(
         leftNum: _i(payload['left_num']),
         rightNum: _i(payload['right_num']),
         den: _i(payload['den'], 4),
       );
-    } else if (payload.containsKey('total') && payload.containsKey('given')) {
-      return _Equation('Досыпь до ${_i(payload['total'])} (уже ${_i(payload['given'])})');
-    } else if (payload.containsKey('parts') && payload.containsKey('need')) {
-      return _Equation('Закрась ${_i(payload['need'])} из ${_i(payload['parts'])}');
     }
-    
-    // Если ничего не подошло — показываем сырые данные для диагностики
+    if (payload.containsKey('total') && payload.containsKey('given')) {
+      return _ComposeHint(total: _i(payload['total'], 10), given: _i(payload['given']));
+    }
+    if (payload.containsKey('parts') && payload.containsKey('need')) {
+      return _ShadeHint(parts: _i(payload['parts'], 8), need: _i(payload['need'], 1));
+    }
+
+    // Если ничего не распознали — диагностический вывод (не бросаем исключение).
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Text(
-        'DEBUG: keys=${payload.keys.join(', ')}, values=${payload.values.map((v) => v.toString()).join(', ')}',
-        style: const TextStyle(fontSize: 12, color: Colors.orange),
+        'DEBUG: keys=${payload.keys.join(', ')}\nvalues=${payload.values.map((v) => v.toString()).join(', ')}',
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
       ),
     );
   }
@@ -81,15 +109,72 @@ class _Equation extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text(
-          '$text = ?',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-              fontSize: 40, fontWeight: FontWeight.w900, color: AppColors.gold),
+  Widget build(BuildContext context) {
+    // Защита от вырожденных значений: если текст выглядит как "0 + 0" или "0 × 0",
+    // это почти наверняка признак потери данных — предупреждаем в лог.
+    final looksEmpty = RegExp(r'^\s*0\s*[+\-−×]\s*0\s*$').hasMatch(text);
+    if (looksEmpty) {
+      // ignore: avoid_print
+      print('DIAG_BRIDGE [VISUAL_WARN] suspicious_zero_equation="$text"');
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Text(
+        '$text = ?',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 40,
+          fontWeight: FontWeight.w900,
+          color: AppColors.gold,
         ),
-      );
+      ),
+    );
+  }
+}
+
+class _ComposeHint extends StatelessWidget {
+  const _ComposeHint({required this.total, required this.given});
+  final int total;
+  final int given;
+
+  @override
+  Widget build(BuildContext context) {
+    final need = (total - given).clamp(0, total);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        children: [
+          Text('🌰 Досыпь до $total',
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Text('Уже есть: $given • Нужно добавить: $need',
+              style: const TextStyle(fontSize: 16, color: Colors.white70)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShadeHint extends StatelessWidget {
+  const _ShadeHint({required this.parts, required this.need});
+  final int parts;
+  final int need;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        children: [
+          Text('🍕 Закрась $need из $parts',
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Text('Доли пиццы ждут твоей магии!',
+              style: const TextStyle(fontSize: 16, color: Colors.white70)),
+        ],
+      ),
+    );
+  }
 }
 
 class _CompareFractions extends StatelessWidget {
