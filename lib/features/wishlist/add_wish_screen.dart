@@ -22,7 +22,7 @@ class _AddWishScreenState extends ConsumerState<AddWishScreen> {
   String _emoji = '🎁';
   bool _isLoading = false;
 
-  static const _emojis = ['🎁', '🧸', '', '', '', '🎮', '🍕', '🏖️', '', ''];
+  static const _emojis = ['🎁', '🧸', '', '', '', '🎮', '', '🏖️', '', ''];
 
   @override
   void dispose() {
