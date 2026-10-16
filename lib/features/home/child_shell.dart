@@ -4,9 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/app_providers.dart';
 import '../../widgets/common.dart';
-import 'home_tab.dart';
 import 'profile_tab.dart';
 import 'wishlist_tab.dart';
+import 'world_map_tab.dart';
 
 /// Каркас приложения ребёнка: шапка с валютами + нижняя навигация (3 таба).
 class ChildShell extends ConsumerStatefulWidget {
@@ -28,28 +28,12 @@ class _ChildShellState extends ConsumerState<ChildShell> {
 
     return MagicScaffold(
       title: '',
-      showHeader: true,
-      headerTrailing: progressAsync.maybeWhen(
-        data: (p) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CurrencyChip(icon: Icons.feather_rounded, value: p.feathers),
-            const SizedBox(width: 8),
-            CurrencyChip(icon: Icons.auto_awesome_rounded, value: p.mana),
-            const SizedBox(width: 8),
-            CurrencyChip(icon: Icons.local_fire_department_rounded, value: p.streakDays),
-          ],
-        ),
-        orElse: () => const SizedBox.shrink(),
-      ),
       body: IndexedStack(
         index: _index,
         children: [
-          HomeTab(kid: kid, progressAsync: progressAsync),
-          WishlistTab(kid: kid),
-          // ИСПРАВЛЕНО: ProfileTab теперь сам читает kid/progress через провайдеры,
-          // поэтому вызываем без аргументов.
-          const ProfileTab(),
+          WorldMapTab(kid: kid),
+          WishlistTab(kid: kid, progress: progressAsync.valueOrNull ?? ChildProgress.empty),
+          ProfileTab(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
