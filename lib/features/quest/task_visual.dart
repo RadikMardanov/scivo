@@ -15,35 +15,64 @@ class TaskVisual extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    switch (_s(payload['kind'])) {
-      case 'mul':
+    // ИСПРАВЛЕНО: читаем kind из payload, если есть; иначе определяем по наличию полей
+    final kind = _s(payload['kind']);
+    
+    if (kind.isNotEmpty) {
+      switch (kind) {
+        case 'mul':
+          return _Equation('${_i(payload['a'])} × ${_i(payload['b'])}');
+        case 'arith':
+          final op = _s(payload['op']) == 'sub' ? '−' : '+';
+          return _Equation('${_i(payload['a'])} $op ${_i(payload['b'])}');
+        case 'read_clock':
+          return _ClockFace(hour: _i(payload['hour']), minute: _i(payload['minute']));
+        case 'compare_frac':
+          return _CompareFractions(
+            leftNum: _i(payload['left_num']),
+            rightNum: _i(payload['right_num']),
+            den: _i(payload['den'], 4),
+          );
+        case 'compose':
+          return _Equation('Досыпь до ${_i(payload['total'])} (уже ${_i(payload['given'])})');
+        case 'shade_frac':
+          return _Equation('Закрась ${_i(payload['need'])} из ${_i(payload['parts'])}');
+        default:
+          break; // падаем в fallback ниже
+      }
+    }
+    
+    // FALLBACK: если kind отсутствует или неизвестен — определяем тип по структуре данных
+    if (payload.containsKey('a') && payload.containsKey('b')) {
+      // Это арифметика (add/sub/mul)
+      if (payload.containsKey('options')) {
         return _Equation('${_i(payload['a'])} × ${_i(payload['b'])}');
-      case 'arith':
-        // ИСПРАВЛЕНО: сервер присылает kind='arith' для сложения/вычитания
+      } else {
         final op = _s(payload['op']) == 'sub' ? '−' : '+';
         return _Equation('${_i(payload['a'])} $op ${_i(payload['b'])}');
-      case 'read_clock':
-        return _ClockFace(hour: _i(payload['hour']), minute: _i(payload['minute']));
-      case 'compare_frac':
-        return _CompareFractions(
-          leftNum: _i(payload['left_num']),
-          rightNum: _i(payload['right_num']),
-          den: _i(payload['den'], 4),
-        );
-      case 'compose':
-        return _Equation('Досыпь до ${_i(payload['total'])} (уже ${_i(payload['given'])})');
-      case 'shade_frac':
-        return _Equation('Закрась ${_i(payload['need'])} из ${_i(payload['parts'])}');
-      default:
-        // Если kind неизвестен — показываем сырые данные для диагностики (временная мера)
-        return Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(
-            'DEBUG: kind=${_s(payload['kind'])}, keys=${payload.keys.join(', ')}',
-            style: const TextStyle(fontSize: 12, color: Colors.orange),
-          ),
-        );
+      }
+    } else if (payload.containsKey('hour') && payload.containsKey('minute')) {
+      return _ClockFace(hour: _i(payload['hour']), minute: _i(payload['minute']));
+    } else if (payload.containsKey('left_num') && payload.containsKey('den')) {
+      return _CompareFractions(
+        leftNum: _i(payload['left_num']),
+        rightNum: _i(payload['right_num']),
+        den: _i(payload['den'], 4),
+      );
+    } else if (payload.containsKey('total') && payload.containsKey('given')) {
+      return _Equation('Досыпь до ${_i(payload['total'])} (уже ${_i(payload['given'])})');
+    } else if (payload.containsKey('parts') && payload.containsKey('need')) {
+      return _Equation('Закрась ${_i(payload['need'])} из ${_i(payload['parts'])}');
     }
+    
+    // Если ничего не подошло — показываем сырые данные для диагностики
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Text(
+        'DEBUG: keys=${payload.keys.join(', ')}, values=${payload.values.map((v) => v.toString()).join(', ')}',
+        style: const TextStyle(fontSize: 12, color: Colors.orange),
+      ),
+    );
   }
 }
 
