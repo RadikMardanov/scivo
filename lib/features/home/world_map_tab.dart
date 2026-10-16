@@ -4,29 +4,21 @@ import '../../core/theme/app_theme.dart';
 import '../../data/worlds.dart';
 import '../../models/family_models.dart';
 import '../../widgets/common.dart';
-import '../quest/quest_screen.dart';
+import '../quest/engine_quest.dart'; // ← НОВЫЙ импорт вместо quest_screen.dart
 
-/// Карта 5 миров. Все острова активны после part10.
+/// Карта 5 миров. Все острова доступны всем классам (R-04).
 class WorldMapTab extends StatelessWidget {
   const WorldMapTab({super.key, required this.kid});
   final ChildProfile kid;
 
-  bool _playable(WorldInfo w) => w.fitsGrade(kid.grade);
-
   void _open(BuildContext context, WorldInfo w) {
-    if (_playable(w)) {
-      Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) =>
-            QuestScreen(childId: kid.id, worldId: w.id, worldTitle: w.title),
-      ));
-    } else {
-      showScivoDialog(
-        context,
-        text: '${w.emoji} ${w.title}\n\n'
-            'Этот остров пока недоступен для твоего класса. Попробуй другой!',
-        button: 'Жду!',
-      );
-    }
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => QuestScreen(
+        childId: kid.id,
+        worldId: w.id,
+        worldTitle: w.title,
+      ),
+    ));
   }
 
   @override
@@ -45,7 +37,6 @@ class WorldMapTab extends StatelessWidget {
               child: _WorldCard(
                 world: kWorlds[i],
                 recommended: kWorlds[i].fitsGrade(kid.grade),
-                playable: _playable(kWorlds[i]),
                 onTap: () => _open(context, kWorlds[i]),
               ),
             ),
@@ -84,16 +75,10 @@ class _PathDots extends StatelessWidget {
 }
 
 class _WorldCard extends StatelessWidget {
-  const _WorldCard({
-    required this.world,
-    required this.recommended,
-    required this.playable,
-    required this.onTap,
-  });
+  const _WorldCard({required this.world, required this.recommended, required this.onTap});
 
   final WorldInfo world;
   final bool recommended;
-  final bool playable;
   final VoidCallback onTap;
 
   @override
@@ -144,10 +129,7 @@ class _WorldCard extends StatelessWidget {
                         _Badge(text: world.gradesLabel),
                         if (recommended)
                           const _Badge(text: 'Для тебя ⭐', highlight: true),
-                        if (playable)
-                          const _Badge(text: 'Играть ▶', highlight: true)
-                        else
-                          const _Badge(text: 'Недоступен'),
+                        const _Badge(text: 'Играть ▶', highlight: true),
                       ],
                     ),
                   ],
