@@ -1,0 +1,188 @@
+=== FILE: lib/services/supabase_service.dart ===
+import 'dart:convert';
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../core/errors.dart';
+import '../data/tasks.dart';
+import '../models/family_models.dart';
+
+class SupabaseService {
+  SupabaseService(this._client);
+
+  final SupabaseClient _client;
+
+  Session? get currentSession => _client.auth.currentSession;
+  Stream<AuthState> get authChanges => _client.auth.onAuthStateChange;
+
+  // ---------- Аккаунт родителя ----------
+  Future<void> signUpParent({
+    required String email,
+    required String password,
+    required String displayName,
+  }) async {
+    await _client.auth.signUp(
+      email: email.trim(),
+      password: password,
+      data: {
+        'display_name': displayName.trim(),
+        'consent': 'true',
+      },
+    );
+  }
+
+  Future<void> signIn(String email, String password) async {
+    await _client.auth.signInWithPassword(
+      email: email.trim(),
+      password: password,
+    );
+  }
+
+  Future<void> signOut() => _client.auth.signOut();
+
+  Future<ParentProfile?> fetchParent() async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return null;
+    final row = await _client
+        .from('parents')
+        .select('id, display_name, has_pin, consent_at')
+        .eq('id', userId)
+        .maybeSingle();
+    return row == null ? null : ParentProfile.fromJson(row);
+  }
+
+  Future<void> giveConsent() async {
+    await _client.rpc('give_consent');
+  }
+
+  Future<void> setParentPin(String pin) async {
+    final result =
+        await _client.rpc('set_parent_pin', params: {'p_new_pin': pin});
+    final check = PinCheckResult.fromJson(_asMap(result));
+    if (!check.ok) throw AppException(check.message);
+  }
+
+  Future<PinCheckResult> verifyParentPin(String pin) async {
+    final result =
+        await _client.rpc('verify_parent_pin', params: {'p_pin': pin});
+    return PinCheckResult.fromJson(_asMap(result));
+  }
+
+  // ---------- Дети ----------
+  Future<List<ChildProfile>> fetchChildren() async {
+    final rows = await _client
+        .from('children')
+        .select(
+            'id, nickname, avatar_id, grade, onboarding_done, daily_feather_cap')
+        .order('created_at');
+    return rows.map((row) => ChildProfile.fromJson(row)).toList();
+  }
+
+  Future<String> createChild({
+    required String nickname,
+    required String avatarId,
+    required int grade,
+    required String pin,
+  }) async {
+    final result = await _client.rpc('create_child', params: {
+      'p_nickname': nickname.trim(),
+      'p_avatar_id': avatarId,
+      'p_grade': grade,
+      'p_pin': pin,
+    });
+    return result.toString();
+  }
+
+  Future<PinCheckResult> verifyChildPin(String childId, String pin) async {
+    final result = await _client.rpc('verify_child_pin', params: {
+      'p_child_id': childId,
+      'p_pin': pin,
+    });
+    return PinCheckResult.fromJson(_asMap(result));
+  }
+
+  // ---------- Прогресс ----------
+  Future<ChildProgress> fetchProgress(String childId) async {
+    final row = await _client
+        .from('child_progress')
+        .select()
+        .eq('child_id', childId)
+        .maybeSingle();
+    return row == null ? ChildProgress.empty : ChildProgress.fromJson(row);
+  }
+
+  Future<CheckinResult> checkin(String childId) async {
+    final raw =
+        await _client.rpc('child_checkin', params: {'p_child_id': childId});
+    final result = _asMap(raw);
+    return CheckinResult(
+      progress:
+          ChildProgress.fromJson(_asMap(result['progress'] as Map? ?? const {})),
+      manaBonus: (result['mana_bonus'] as num?)?.toInt() ?? 0,
+      usedFreeze: result['used_freeze'] == true,
+    );
+  }
+
+  Future<int> completeOnboarding(String childId) async {
+    final raw = await _client
+        .rpc('complete_onboarding', params: {'p_child_id': childId});
+    final result = _asMap(raw);
+    return (result['mana_bonus'] as num?)?.toInt() ?? 0;
+  }
+
+  // ---------- Вишлист ----------
+  Future<List<WishlistItem>> fetchWishlist() async {
+    final rows = await _client
+        .from('wishlist_items')
+        .select('id, title, feather_cost, emoji')
+        .eq('is_active', true)
+        .order('feather_cost');
+    return rows.map((row) => WishlistItem.fromJson(row)).toList();
+  }
+
+  // ---------- Задания (миграция 002) ----------
+  /// Выдаёт новую задачу по миру. Ответ на клиент не приходит.
+  /// HOTFIX 002e: явно сериализуем params в JSON через jsonEncode/jsonDecode,
+  /// чтобы supabase_flutter гарантированно отправил их серверу как объект.
+  Future<GeneratedTask> generateTask(String childId, String worldId) async {
+    final paramsJson = jsonEncode({
+      'p_child_id': childId,
+      'p_world_id': worldId,
+    });
+    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
+    final raw = await _client.rpc('generate_task', params: params);
+    return GeneratedTask.fromJson(_asMap(raw));
+  }
+
+  /// Отправляет ответ на сервер; сервер решает, верно ли, и начисляет награды.
+  Future<SubmitResult> submitAnswer(
+    String childId,
+    String taskId,
+    Map<String, dynamic> input,
+  ) async {
+    final paramsJson = jsonEncode({
+      'p_child_id': childId,
+      'p_task_id': taskId,
+      'p_input': input,
+    });
+    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
+    final raw = await _client.rpc('submit_answer', params: params);
+    return SubmitResult.fromJson(_asMap(raw));
+  }
+
+  /// Просит подсказку уровня 1..3 (тратит ману на сервере).
+  Future<HintResult> requestHint(String childId, String taskId, int level) async {
+    final paramsJson = jsonEncode({
+      'p_child_id': childId,
+      'p_task_id': taskId,
+      'p_level': level,
+    });
+    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
+    final raw = await _client.rpc('request_hint', params: params);
+    return HintResult.fromJson(_asMap(raw));
+  }
+
+  Map<String, dynamic> _asMap(dynamic value) =>
+      Map<String, dynamic>.from(value as Map? ?? const {});
+}
+=== END FILE ===
