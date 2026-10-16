@@ -22,7 +22,8 @@ class _DragInputState extends State<DragInput> {
   @override
   void initState() {
     super.initState();
-    _rightCount = widget.total - widget.given;
+    // ИСПРАВЛЕНО: начинаем с нуля, а не с правильного ответа
+    _rightCount = 0;
   }
 
   void _tapRight(int delta) {

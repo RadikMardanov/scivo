@@ -87,7 +87,7 @@ class _QuestScreenState extends ConsumerState<QuestScreen> {
                   if (state.lastResult != null && !solved) ...[
                     const SizedBox(height: 12),
                     const Text(
-                      'Почти! Посмотри ещё раз — я рядом. 🐦‍⬛',
+                      'Почти! Посмотри ещё раз — я рядом. 🐦‍',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white70),
                     ),

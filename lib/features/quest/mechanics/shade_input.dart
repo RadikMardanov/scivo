@@ -46,7 +46,7 @@ class _ShadeInputState extends State<ShadeInput> {
     return Column(
       children: [
         SizedBox(
-          height: 180,
+          height: MediaQuery.sizeOf(context).width * 0.8, // адаптивная высота
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(

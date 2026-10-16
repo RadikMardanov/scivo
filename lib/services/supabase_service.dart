@@ -1,3 +1,4 @@
+// ПОЛНАЯ ВЕРСИЯ С НОВЫМИ МЕТОДАМИ ДЛЯ EDIT CHILD И WISHLIST
 import 'dart:convert';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -92,6 +93,19 @@ class SupabaseService {
     return result.toString();
   }
 
+  /// Обновляет имя и класс ребёнка (без PIN).
+  Future<void> updateChild({
+    required String childId,
+    required String nickname,
+    required int grade,
+  }) async {
+    await _client.rpc('update_child_profile', params: {
+      'p_child_id': childId,
+      'p_nickname': nickname.trim(),
+      'p_grade': grade,
+    });
+  }
+
   Future<PinCheckResult> verifyChildPin(String childId, String pin) async {
     final result = await _client.rpc('verify_child_pin', params: {
       'p_child_id': childId,
@@ -133,23 +147,49 @@ class SupabaseService {
   Future<List<WishlistItem>> fetchWishlist() async {
     final rows = await _client
         .from('wishlist_items')
-        .select('id, title, feather_cost, emoji')
+        .select('id, title, feather_cost, emoji, is_active, requested_at')
         .eq('is_active', true)
         .order('feather_cost');
     return rows.map((row) => WishlistItem.fromJson(row)).toList();
   }
 
+  /// Добавляет новое желание в вишлист.
+  Future<void> addWishlistItem({
+    required String title,
+    required int featherCost,
+    required String emoji,
+  }) async {
+    await _client.from('wishlist_items').insert({
+      'parent_id': _client.auth.currentUser?.id,
+      'title': title,
+      'feather_cost': featherCost,
+      'emoji': emoji,
+      'is_active': true,
+    });
+  }
+
+  /// Помечает желание как запрошенное ребёнком (замораживает перья).
+  Future<void> requestWishlistItem(String itemId) async {
+    await _client.rpc('request_wishlist_item', params: {'p_item_id': itemId});
+  }
+
+  /// Подтверждает выдачу приза родителем (размораживает перья).
+  Future<void> confirmDelivered(String itemId) async {
+    await _client.rpc('confirm_delivered', params: {'p_item_id': itemId});
+  }
+
+  /// Отклоняет запрос ребёнка (возвращает замороженные перья).
+  Future<void> declineRequest(String itemId) async {
+    await _client.rpc('decline_request', params: {'p_item_id': itemId});
+  }
+
   // ---------- Задания (миграция 002) ----------
   /// Выдаёт новую задачу по миру. Ответ на клиент не приходит.
-  /// HOTFIX 002e: явно сериализуем params в JSON через jsonEncode/jsonDecode,
-  /// чтобы supabase_flutter гарантированно отправил их серверу как объект.
   Future<GeneratedTask> generateTask(String childId, String worldId) async {
-    final paramsJson = jsonEncode({
+    final raw = await _client.rpc('generate_task', params: {
       'p_child_id': childId,
       'p_world_id': worldId,
     });
-    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
-    final raw = await _client.rpc('generate_task', params: params);
     return GeneratedTask.fromJson(_asMap(raw));
   }
 
@@ -159,25 +199,21 @@ class SupabaseService {
     String taskId,
     Map<String, dynamic> input,
   ) async {
-    final paramsJson = jsonEncode({
+    final raw = await _client.rpc('submit_answer', params: {
       'p_child_id': childId,
       'p_task_id': taskId,
       'p_input': input,
     });
-    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
-    final raw = await _client.rpc('submit_answer', params: params);
     return SubmitResult.fromJson(_asMap(raw));
   }
 
   /// Просит подсказку уровня 1..3 (тратит ману на сервере).
   Future<HintResult> requestHint(String childId, String taskId, int level) async {
-    final paramsJson = jsonEncode({
+    final raw = await _client.rpc('request_hint', params: {
       'p_child_id': childId,
       'p_task_id': taskId,
       'p_level': level,
     });
-    final params = jsonDecode(paramsJson) as Map<String, dynamic>;
-    final raw = await _client.rpc('request_hint', params: params);
     return HintResult.fromJson(_asMap(raw));
   }
 
