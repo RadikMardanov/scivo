@@ -1,0 +1,196 @@
+=== FILE: lib/features/quest/task_visual.dart ===
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../core/theme/app_theme.dart';
+
+/// Рисует УСЛОВИЕ задачи (то, что видит ребёнок). Правильного ответа тут нет —
+/// он живёт только на сервере в active_tasks.answer.
+class TaskVisual extends StatelessWidget {
+  const TaskVisual({super.key, required this.payload});
+  final Map<String, dynamic> payload;
+
+  int _i(dynamic v, [int d = 0]) => (v as num?)?.toInt() ?? d;
+  String _s(dynamic v) => v?.toString() ?? '';
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_s(payload['kind'])) {
+      case 'mul':
+        return _Equation('${_i(payload['a'])} × ${_i(payload['b'])}');
+      case 'arith':
+        // ИСПРАВЛЕНО: сервер присылает kind='arith' для сложения/вычитания
+        final op = _s(payload['op']) == 'sub' ? '−' : '+';
+        return _Equation('${_i(payload['a'])} $op ${_i(payload['b'])}');
+      case 'read_clock':
+        return _ClockFace(hour: _i(payload['hour']), minute: _i(payload['minute']));
+      case 'compare_frac':
+        return _CompareFractions(
+          leftNum: _i(payload['left_num']),
+          rightNum: _i(payload['right_num']),
+          den: _i(payload['den'], 4),
+        );
+      case 'compose':
+        return _Equation('Досыпь до ${_i(payload['total'])} (уже ${_i(payload['given'])})');
+      case 'shade_frac':
+        return _Equation('Закрась ${_i(payload['need'])} из ${_i(payload['parts'])}');
+      default:
+        // Если kind неизвестен — показываем сырые данные для диагностики (временная мера)
+        return Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'DEBUG: kind=${_s(payload['kind'])}, keys=${payload.keys.join(', ')}',
+            style: const TextStyle(fontSize: 12, color: Colors.orange),
+          ),
+        );
+    }
+  }
+}
+
+class _Equation extends StatelessWidget {
+  const _Equation(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text(
+          '$text = ?',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+              fontSize: 40, fontWeight: FontWeight.w900, color: AppColors.gold),
+        ),
+      );
+}
+
+class _CompareFractions extends StatelessWidget {
+  const _CompareFractions(
+      {required this.leftNum, required this.rightNum, required this.den});
+  final int leftNum, rightNum, den;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _FracBar(filled: leftNum, parts: den, label: '$leftNum/$den'),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12),
+            child: Text('?',
+                style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.purpleLight)),
+          ),
+          _FracBar(filled: rightNum, parts: den, label: '$rightNum/$den'),
+        ],
+      );
+}
+
+class _FracBar extends StatelessWidget {
+  const _FracBar({required this.filled, required this.parts, required this.label});
+  final int filled, parts;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = parts < 1 ? 1 : parts;
+    return Column(
+      children: [
+        SizedBox(
+          width: 120,
+          height: 26,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                for (var i = 0; i < p; i++)
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: i < filled
+                            ? AppColors.gold
+                            : Colors.white.withValues(alpha: 0.12),
+                        border: i < p - 1
+                            ? const Border(right: BorderSide(color: Colors.black26))
+                            : null,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+      ],
+    );
+  }
+}
+
+class _ClockFace extends StatelessWidget {
+  const _ClockFace({required this.hour, required this.minute});
+  final int hour, minute;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: SizedBox(
+          width: 180,
+          height: 180,
+          child: CustomPaint(painter: _ClockPainter(hour: hour, minute: minute)),
+        ),
+      );
+}
+
+class _ClockPainter extends CustomPainter {
+  _ClockPainter({required this.hour, required this.minute});
+  final int hour, minute;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2 - 6;
+    canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4
+          ..color = AppColors.purpleLight);
+    final tick = Paint()
+      ..color = Colors.white70
+      ..strokeWidth = 3;
+    for (var i = 0; i < 12; i++) {
+      final a = (math.pi / 6) * i;
+      canvas.drawLine(
+        c + Offset(math.sin(a), -math.cos(a)) * (r - 10),
+        c + Offset(math.sin(a), -math.cos(a)) * r,
+        tick,
+      );
+    }
+    final hAng = (math.pi / 6) * ((hour % 12) + minute / 60);
+    final mAng = (math.pi / 30) * minute;
+    canvas.drawLine(
+      c,
+      c + Offset(math.sin(hAng), -math.cos(hAng)) * (r * 0.5),
+      Paint()
+        ..color = Colors.white
+        ..strokeWidth = 6
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      c,
+      c + Offset(math.sin(mAng), -math.cos(mAng)) * (r * 0.78),
+      Paint()
+        ..color = AppColors.gold
+        ..strokeWidth = 4
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawCircle(c, 6, Paint()..color = AppColors.gold);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ClockPainter old) =>
+      old.hour != hour || old.minute != minute;
+}
+=== END FILE ===
