@@ -29,7 +29,7 @@ class AuthGate extends ConsumerWidget {
 
     // Согласие есть, но детей ещё нет → экран добавления первого героя.
     final kids = childrenAsync.valueOrNull ?? const [];
-    if (kids.isEmpty) return const ProfilePicker(isFirstTime: true);
+    if (kids.isEmpty) return ProfilePicker(isFirstTime: true);
 
     // Дети есть, активный выбран → домашний шелтер ребёнка.
     if (activeKid != null) return const ChildShell();

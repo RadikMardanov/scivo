@@ -36,6 +36,7 @@ final childrenProvider = FutureProvider<List<ChildProfile>>((ref) async {
 final activeChildProvider = StateProvider<ChildProfile?>((ref) => null);
 
 // --- Прогресс конкретного ребёнка ---
+// Используем стандартный family provider из riverpod
 final progressProvider = FamilyProvider<String, ChildProgress>((ref, childId) async {
   final service = ref.read(serviceProvider);
   return service.fetchProgress(childId);

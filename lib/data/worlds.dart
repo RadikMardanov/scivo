@@ -1,81 +1,79 @@
 import 'package:flutter/material.dart';
 
+import '../core/theme/app_theme.dart';
+
+/// Информация о мире (острове) на карте.
 class WorldInfo {
   const WorldInfo({
     required this.id,
     required this.title,
     required this.topic,
     required this.emoji,
-    required this.mechanic,
-    required this.minGrade,
-    required this.maxGrade,
     required this.colors,
+    required this.gradeMin,
+    required this.gradeMax,
   });
 
   final String id;
   final String title;
   final String topic;
   final String emoji;
-  final String mechanic;
-  final int minGrade;
-  final int maxGrade;
   final List<Color> colors;
+  final int gradeMin;
+  final int gradeMax;
 
-  bool fitsGrade(int grade) => grade >= minGrade && grade <= maxGrade;
+  bool fitsGrade(int grade) => grade >= gradeMin && grade <= gradeMax;
 
-  String get gradesLabel =>
-      minGrade == maxGrade ? '$minGrade класс' : '$minGrade–$maxGrade класс';
+  String get gradesLabel => gradeMin == gradeMax
+      ? '$gradeMin класс'
+      : '$gradeMin–$gradeMax класс';
 }
 
-const List<WorldInfo> kWorlds = [
+/// Все пять миров этапа 3.
+const kWorlds = <WorldInfo>[
   WorldInfo(
     id: 'forest',
     title: 'Лес Счёта',
     topic: 'Состав числа, счёт до 20',
     emoji: '🌲',
-    mechanic: 'Перетаскивание',
-    minGrade: 1,
-    maxGrade: 2,
-    colors: [Color(0xFF2E8B57), Color(0xFF1F5E4A)],
+    colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+    gradeMin: 1,
+    gradeMax: 2,
   ),
   WorldInfo(
     id: 'bridge',
     title: 'Мост Чисел',
     topic: 'Сложение и вычитание до 100',
     emoji: '🌉',
-    mechanic: 'Числовая прямая',
-    minGrade: 1,
-    maxGrade: 2,
-    colors: [Color(0xFF3A7BD5), Color(0xFF2A4E9B)],
+    colors: [Color(0xFF1565C0), Color(0xFF42A5F5)],
+    gradeMin: 1,
+    gradeMax: 2,
   ),
   WorldInfo(
     id: 'cave',
     title: 'Пещера Умножения',
     topic: 'Таблица умножения',
     emoji: '🐉',
-    mechanic: 'Голос и босс-дракон',
-    minGrade: 2,
-    maxGrade: 3,
-    colors: [Color(0xFFD9534F), Color(0xFF8E2C48)],
+    colors: [Color(0xFFC62828), Color(0xFFEF5350)],
+    gradeMin: 2,
+    gradeMax: 3,
   ),
   WorldInfo(
     id: 'clock',
     title: 'Башня Часов',
-    topic: 'Время и часы',
-    emoji: '⏰',
-    mechanic: 'Стрелки часов',
-    minGrade: 2,
-    maxGrade: 3,
-    colors: [Color(0xFFE0A030), Color(0xFF9A5B13)],
+    topic: 'Чтение времени',
+    emoji: '🕰️',
+    colors: [Color(0xFF6A1B9A), Color(0xFFAB47BC)],
+    gradeMin: 2,
+    gradeMax: 3,
   ),
   WorldInfo(
     id: 'fractions',
     title: 'Фракции Хаоса',
-    topic: 'Доли: половина, четверть, треть',
-    emoji: '🌀',
-    mechanic: 'Закрашивание долей',
-    minGrade: 3,
-    maxGrade: 4,
-    colors: [Color(0xFF8E5BE8), Color(0xFF4B2E83)],
+    topic: 'Доли и дроби',
+    emoji: '🍕',
+    colors: [Color(0xFFF57F17), Color(0xFFFFCA28)],
+    gradeMin: 3,
+    gradeMax: 4,
   ),
 ];

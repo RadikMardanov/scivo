@@ -24,12 +24,9 @@ class WishlistTab extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.card_giftcard_rounded,
-                    size: 64, color: AppColors.purpleLight),
+                const Icon(Icons.card_giftcard_rounded, size: 64, color: AppColors.purpleLight),
                 const SizedBox(height: 12),
-                Text('Вишлист пуст 🎁\nПопроси маму или папу добавить подарок!',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 16, height: 1.4)),
+                Text('Вишлист пуст 🎁\nПопроси маму или папу добавить подарок!', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, height: 1.4)),
               ],
             ),
           ),
@@ -53,15 +50,9 @@ class WishlistTab extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(w.title,
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w800)),
+                    Text(w.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 4),
-                    Text('${w.featherCost} 🪶',
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: enough ? AppColors.gold : Colors.white54)),
+                    Text('${w.featherCost} 🪶', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: enough ? AppColors.gold : Colors.white54)),
                   ],
                 ),
               ),

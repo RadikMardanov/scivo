@@ -13,7 +13,7 @@ class MagicBackground extends StatelessWidget {
       children: [
         Positioned.fill(
           child: DecoratedBox(
-            decoration: BoxDecoration(gradient: AppTheme.nightGradient),
+            decoration: BoxDecoration(gradient: nightGradient),
           ),
         ),
         Positioned.fill(
@@ -52,12 +52,14 @@ class MagicScaffold extends StatelessWidget {
     this.title,
     this.actions,
     this.bottomNavigationBar,
+    this.showBack = true,
   });
 
   final Widget body;
   final String? title;
   final List<Widget>? actions;
   final Widget? bottomNavigationBar;
+  final bool showBack;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +69,7 @@ class MagicScaffold extends StatelessWidget {
       appBar: title == null
           ? null
           : AppBar(
+              automaticallyImplyLeading: showBack,
               backgroundColor: Colors.transparent,
               elevation: 0,
               centerTitle: true,
@@ -226,4 +229,55 @@ String pluralRu(int n, String one, String few, String many) {
   if (mod10 == 1 && mod100 != 11) return one;
   if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return few;
   return many;
+}
+
+/// Стиль поля ввода "магия".
+InputDecoration magicInput(String label, {IconData? icon}) {
+  return InputDecoration(
+    labelText: label,
+    prefixIcon: icon != null ? Icon(icon, color: AppColors.gold) : null,
+    filled: true,
+    fillColor: Colors.white.withValues(alpha: 0.1),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: const BorderSide(color: AppColors.gold, width: 2),
+    ),
+    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+    labelStyle: const TextStyle(color: AppColors.gold, fontWeight: FontWeight.w700),
+  );
+}
+
+/// Показать снекбар с ошибкой/успехом.
+void showSnack(BuildContext context, String message, {bool isError = false}) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(message),
+      backgroundColor: isError ? AppColors.errorRed : AppColors.successGreen,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  );
+}
+
+/// Виджет Scivo говорит (для онбординга и подсказок).
+class ScivoSays extends StatelessWidget {
+  const ScivoSays({super.key, required this.text, this.avatarId = 'raven_blue'});
+  final String text;
+  final String avatarId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        CircleAvatar(
+          radius: 32,
+          backgroundColor: AppColors.purpleLight,
+          child: Text('🐦‍⬛', style: const TextStyle(fontSize: 32)),
+        ),
+        const SizedBox(height: 12),
+        SpeechBubble(text),
+      ],
+    );
+  }
 }

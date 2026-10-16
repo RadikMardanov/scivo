@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../models/family_models.dart';
 import '../../providers/app_providers.dart';
 import '../../widgets/common.dart';
 import 'profile_tab.dart';
