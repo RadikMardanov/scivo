@@ -30,6 +30,7 @@ class GeneratedTask {
       worldId: json['world_id'].toString(),
       mechanic: json['mechanic'].toString(),
       difficulty: (json['difficulty'] as num?)?.toInt() ?? 1,
+      // ИСПРАВЛЕНО: читаем payload из JSON (был потерян при парсинге)
       payload: Map<String, dynamic>.from(json['payload'] as Map? ?? const {}),
     );
   }
