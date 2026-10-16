@@ -1,0 +1,897 @@
+=== FILE: lib/features/quest/engine_quest.dart ===
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/theme/app_theme.dart';
+import '../../data/tasks.dart';
+import '../../providers/app_providers.dart';
+import '../../services/supabase_service.dart';
+import '../../widgets/common.dart';
+import '../../widgets/scivo_raven.dart';
+import 'mechanics/choice_input.dart';
+import 'mechanics/keypad_input.dart';
+
+// ============================================================
+// КОНЕЧНАЯ МАШИНА СОСТОЯНИЙ ДВИЖКА ЗАДАНИЙ
+// ============================================================
+
+enum QuestPhase { idle, loading, error, ready, solving, solved }
+
+class QuestSnapshot {
+  const QuestSnapshot({
+    required this.phase,
+    this.task,
+    this.lastResult,
+    this.lastHint,
+    this.hintLevel = 0,
+    this.errorMessage,
+  });
+
+  final QuestPhase phase;
+  final GeneratedTask? task;
+  final SubmitResult? lastResult;
+  final HintResult? lastHint;
+  final int hintLevel;
+  final String? errorMessage;
+
+  bool get isBusy => phase == QuestPhase.loading || phase == QuestPhase.solving;
+  bool get canInteract => phase == QuestPhase.ready && !isBusy;
+  bool get showSolvedPanel => phase == QuestPhase.solved && lastResult?.correct == true;
+
+  QuestSnapshot copyWith({
+    QuestPhase? phase,
+    GeneratedTask? task,
+    SubmitResult? lastResult,
+    HintResult? lastHint,
+    int? hintLevel,
+    String? errorMessage,
+  }) {
+    return QuestSnapshot(
+      phase: phase ?? this.phase,
+      task: task ?? this.task,
+      lastResult: lastResult ?? this.lastResult,
+      lastHint: lastHint ?? this.lastHint,
+      hintLevel: hintLevel ?? this.hintLevel,
+      errorMessage: errorMessage,
+    );
+  }
+
+  static const initial = QuestSnapshot(phase: QuestPhase.idle);
+}
+
+// DIAG_Q: печатаем каждый переход FSM для удалённой диагностики.
+void _diag(String tag, [String? detail]) {
+  // ignore: avoid_print
+  print('DIAG_Q [$tag] ${detail ?? ''}');
+}
+
+class QuestEngine extends StateNotifier<QuestSnapshot> {
+  QuestEngine(this._service) : super(QuestSnapshot.initial);
+
+  final SupabaseService _service;
+  String? _childId;
+  String? _worldId;
+
+  Future<void> start(String childId, String worldId) async {
+    _childId = childId;
+    _worldId = worldId;
+    state = state.copyWith(
+      phase: QuestPhase.loading,
+      task: null,
+      lastResult: null,
+      lastHint: null,
+      hintLevel: 0,
+      errorMessage: '',
+    );
+    _diag('LOAD_START', 'child=$childId world=$worldId');
+
+    try {
+      final task = await _service.generateTask(childId, worldId);
+      _diag('TASK_RECEIVED',
+          'taskId=${task.taskId} mechanic=${task.mechanic} payloadKeys=${task.payload.keys.toList()}');
+
+      if (task.taskId.isEmpty) {
+        throw Exception('server_returned_empty_task_id');
+      }
+
+      state = state.copyWith(phase: QuestPhase.ready, task: task, errorMessage: '');
+      _diag('READY', 'mechanic=${task.mechanic}');
+    } catch (e, st) {
+      _diag('ERROR', '$e\nstack:${st.toString().split('\n').take(3).join('|')}');
+      state = state.copyWith(
+          phase: QuestPhase.error, errorMessage: e.toString(), task: null);
+    }
+  }
+
+  Future<void> retry() async {
+    if (_childId != null && _worldId != null) {
+      await start(_childId!, _worldId!);
+    }
+  }
+
+  Future<void> submitAnswer(Map<String, dynamic> input) async {
+    final task = state.task;
+    if (task == null || _childId == null) return;
+
+    state = state.copyWith(phase: QuestPhase.solving);
+    _diag('SUBMIT_SENT', 'input=$input taskId=${task.taskId}');
+
+    try {
+      final result = await _service.submitAnswer(_childId!, task.taskId, input);
+      _diag('SUBMIT_RESULT',
+          'correct=${result.correct} feedbackKey=${result.feedbackKey}');
+
+      if (result.correct) {
+        state = state.copyWith(phase: QuestPhase.solved, lastResult: result);
+      } else {
+        // Неверный ответ: остаёмся в ready, показываем мягкий фидбек, задача НЕ стирается.
+        state = state.copyWith(phase: QuestPhase.ready, lastResult: result);
+      }
+    } catch (e) {
+      _diag('SUBMIT_ERROR', '$e');
+      state = state.copyWith(phase: QuestPhase.ready, errorMessage: e.toString());
+    }
+  }
+
+  Future<void> askHint() async {
+    final task = state.task;
+    if (task == null || _childId == null || state.hintLevel >= 3) return;
+
+    final nextLevel = state.hintLevel + 1;
+    state = state.copyWith(phase: QuestPhase.solving);
+    _diag('HINT_REQUEST', 'level=$nextLevel');
+
+    try {
+      final hint = await _service.requestHint(_childId!, task.taskId, nextLevel);
+      _diag('HINT_RECEIVED', 'text="${hint.text}" spent=${hint.manaSpent}');
+      state = state.copyWith(
+          phase: QuestPhase.ready, lastHint: hint, hintLevel: nextLevel);
+    } catch (e) {
+      _diag('HINT_ERROR', '$e');
+      state = state.copyWith(phase: QuestPhase.ready, errorMessage: e.toString());
+    }
+  }
+
+  void reset() {
+    _diag('RESET');
+    state = QuestSnapshot.initial;
+    _childId = null;
+    _worldId = null;
+  }
+}
+
+final questEngineProvider =
+    StateNotifierProvider.autoDispose.family<QuestEngine, QuestSnapshot, String>(
+        (ref, key) {
+  // key = "${childId}:${worldId}" для изоляции состояний разных героев/миров
+  final service = ref.read(serviceProvider);
+  return QuestEngine(service);
+});
+
+// ============================================================
+// ЭКРАН КВЕСТА (чистый rebuild)
+// ============================================================
+
+class QuestScreen extends ConsumerStatefulWidget {
+  const QuestScreen({
+    super.key,
+    required this.childId,
+    required this.worldId,
+    required this.worldTitle,
+  });
+
+  final String childId;
+  final String worldId;
+  final String worldTitle;
+
+  @override
+  ConsumerState<QuestScreen> createState() => _QuestScreenState();
+}
+
+class _QuestScreenState extends ConsumerState<QuestScreen> {
+  late final String _engineKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _engineKey = '${widget.childId}:${widget.worldId}';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref
+          .read(questEngineProvider(_engineKey).notifier)
+          .start(widget.childId, widget.worldId);
+    });
+  }
+
+  @override
+  void dispose() {
+    ref.read(questEngineProvider(_engineKey).notifier).reset();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final snap = ref.watch(questEngineProvider(_engineKey));
+    final avatarId = ref.watch(activeChildProvider)?.avatarId ?? 'raven_blue';
+
+    Widget content;
+    switch (snap.phase) {
+      case QuestPhase.idle:
+      case QuestPhase.loading:
+        content = const Center(
+            child: CircularProgressIndicator(color: AppColors.gold));
+      case QuestPhase.error:
+        content = ErrorView(
+          message: _friendlyErrorMessage(
+              snap.errorMessage ?? 'Не удалось загрузить задание'),
+          onRetry: () =>
+              ref.read(questEngineProvider(_engineKey).notifier).retry(),
+        );
+      case QuestPhase.ready:
+      case QuestPhase.solving:
+      case QuestPhase.solved:
+        final task = snap.task;
+        if (task == null) {
+          // Защитная ветка: фаза ready/solving/solved без task — невозможна в теории,
+          // но страхуемся от любых гонок.
+          content = const Center(
+              child: CircularProgressIndicator(color: AppColors.gold));
+        } else {
+          content = _ReadyBody(snapshot: snap, task: task, avatarId: avatarId);
+        }
+    }
+
+    return MagicScaffold(title: widget.worldTitle, body: content);
+  }
+
+  String _friendlyErrorMessage(String raw) {
+    final t = raw.toLowerCase();
+    if (t.contains('no_template_for_world')) {
+      return 'Для этого острова задания ещё готовятся. Попробуй другой мир!';
+    }
+    if (t.contains('not_authorized') || t.contains('child_not_found')) {
+      return 'Профиль не найден. Выйди и войди снова.';
+    }
+    if (t.contains('failed host lookup') ||
+        t.contains('socketexception') ||
+        t.contains('clientexception')) {
+      return 'Нет связи с интернетом. Проверь Wi-Fi и попробуй снова.';
+    }
+    if (t.contains('empty_task_id')) {
+      return 'Сервер прислал пустое задание. Нажми «Попробовать снова».';
+    }
+    return 'Что-то пошло не так:\n$raw';
+  }
+}
+
+class _ReadyBody extends StatelessWidget {
+  const _ReadyBody(
+      {required this.snapshot, required this.task, required this.avatarId});
+  final QuestSnapshot snapshot;
+  final GeneratedTask task;
+  final String avatarId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(child: ScivoRaven(size: 96, avatarId: avatarId)),
+                const SizedBox(height: 8),
+                SpeechBubble(_promptText(task)),
+                const SizedBox(height: 16),
+                // ГЛАВНОЕ ИЗМЕНЕНИЕ: условие рисуется ПРЯМО здесь, не через отдельный TaskVisual.
+                // Это исключает целый класс багов передачи props между виджетами.
+                _ConditionCard(task: task),
+                if (snapshot.lastHint != null) ...[
+                  const SizedBox(height: 12),
+                  _HintBubble(snapshot.lastHint!.text),
+                ],
+                if (snapshot.lastResult != null &&
+                    snapshot.lastResult?.correct == false) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.purpleLight.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.refresh_rounded, color: AppColors.gold),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Почти! Посмотри ещё раз — я рядом. 🐦‍⬛',
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          child: snapshot.showSolvedPanel
+              ? _SolvedPanel(
+                  result: snapshot.lastResult!,
+                  onNext: () => ref
+                      .read(questEngineProvider('${task.worldId}').notifier)
+                      .retry())
+              : Column(
+                  children: [
+                    _InputArea(
+                      task: task,
+                      enabled: snapshot.canInteract,
+                      onSubmit: (v) => ref
+                          .read(questEngineProvider('${task.worldId}').notifier)
+                          .submitAnswer(v),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: (!snapshot.canInteract || snapshot.hintLevel >= 3)
+                            ? null
+                            : () => ref
+                                .read(questEngineProvider('${task.worldId}').notifier)
+                                .askHint(),
+                        icon: const Icon(Icons.lightbulb_outline_rounded),
+                        label: Text('Подсказка · 5 ✨ (${snapshot.hintLevel}/3)'),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  String _promptText(GeneratedTask t) {
+    final p = t.payload;
+    final kind = (p['kind']?.toString() ?? '').toLowerCase();
+    switch (kind) {
+      case 'mul':
+        return 'Кар! Умножай быстро — дракон ждёт!';
+      case 'arith':
+        return (p['op']?.toString()?.toLowerCase() == 'sub')
+            ? 'Вычитай без страха!'
+            : 'Складывай смелее!';
+      case 'add':
+        return 'Складывай смелее!';
+      case 'sub':
+        return 'Вычитай без страха!';
+      case 'read_clock':
+        return 'Посмотри на стрелки — который час?';
+      case 'compare_frac':
+        return 'Какая дробь больше?';
+      case 'compose':
+        return 'Досыпь жёлуди до кучи!';
+      case 'shade_frac':
+        return 'Закрась нужные дольки!';
+      default:
+        return 'Реши задачу, я в тебя верю!';
+    }
+  }
+}
+
+/// Карточка с УСЛОВИЕМ задачи. Рисует числа/дроби/часы прямо из payload.
+/// Никаких внешних зависимостей от других visualizer-классов.
+class _ConditionCard extends StatelessWidget {
+  const _ConditionCard({required this.task});
+  final GeneratedTask task;
+
+  int _i(dynamic v, [int d = 0]) => (v as num?)?.toInt() ?? d;
+  String _s(dynamic v) => v?.toString() ?? '';
+
+  @override
+  Widget build(BuildContext context) {
+    final p = task.payload;
+
+    // Защита от пустого payload — явный текстовый индикатор проблемы.
+    if (p.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.redAccent),
+        ),
+        child: const Text(
+          '⚠️ Данные задания пусты. Нажми «Попробовать снова».',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white, fontSize: 16),
+        ),
+      );
+    }
+
+    final kind = _s(p['kind']).toLowerCase();
+    final op = _s(p['op']).toLowerCase();
+
+    // Арифметика: add/sub/mul/arith
+    if (kind == 'arith' || kind == 'add' || kind == 'sub' || kind == 'mul') {
+      final a = _i(p['a']);
+      final b = _i(p['b']);
+      String symbol;
+      if (kind == 'mul' || (kind == 'arith' && op == 'mul')) {
+        symbol = '×';
+      } else if (op == 'sub' || kind == 'sub') {
+        symbol = '−';
+      } else {
+        symbol = '+';
+      }
+      return _BigEquation(left: '$a $symbol $b');
+    }
+
+    // Сравнение дробей
+    if (kind == 'compare_frac') {
+      return _FractionCompareRow(
+        leftNum: _i(p['left_num']),
+        rightNum: _i(p['right_num']),
+        den: _i(p['den'], 4),
+      );
+    }
+
+    // Состав числа (Лес Счёта)
+    if (kind == 'compose') {
+      final total = _i(p['total'], 10);
+      final given = _i(p['given']);
+      final need = (total - given).clamp(0, total);
+      return Column(
+        children: [
+          Text('🌰 Досыпь до $total',
+              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Text('Уже есть: $given • Нужно добавить: $need',
+              style: const TextStyle(fontSize: 16, color: Colors.white70)),
+        ],
+      );
+    }
+
+    // Закрашивание долей (Фракции Хаоса)
+    if (kind == 'shade_frac') {
+      final parts = _i(p['parts'], 8);
+      final need = _i(p['need'], 1);
+      return Column(
+        children: [
+          Text('🍕 Закрась $need из $parts',
+              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Text('Доли пиццы ждут твоей магии!',
+              style: const TextStyle(fontSize: 16, color: Colors.white70)),
+        ],
+      );
+    }
+
+    // Часы
+    if (kind == 'read_clock') {
+      return _MiniClock(hour: _i(p['hour']), minute: _i(p['minute']));
+    }
+
+    // Fallback: показываем сырые данные, чтобы никогда не рисовать голую пустоту.
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.nightCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        'Тип задания: ${kind.isEmpty ? '(не указан)' : kind}\n'
+        'Поля: ${p.keys.join(', ')}\n'
+        'Значения: ${p.values.map((v) => v.toString()).join(', ')}',
+        style: const TextStyle(
+            fontSize: 13, color: Colors.orangeAccent, fontFamily: 'monospace'),
+      ),
+    );
+  }
+}
+
+class _BigEquation extends StatelessWidget {
+  const _BigEquation({required this.left});
+  final String left;
+
+  @override
+  Widget build(BuildContext context) {
+    // DIAG_Q: подтверждаем факт рендера уравнения.
+    // ignore: avoid_print
+    print('DIAG_Q [RENDER_EQUATION] "$left = ?"');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Text(
+        '$left = ?',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 44,
+          fontWeight: FontWeight.w900,
+          color: AppColors.gold,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+}
+
+class _FractionCompareRow extends StatelessWidget {
+  const _FractionCompareRow(
+      {required this.leftNum, required this.rightNum, required this.den});
+  final int leftNum, rightNum, den;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _FracBar(filled: leftNum, parts: den, label: '$leftNum/$den'),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Text('?',
+              style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.purpleLight)),
+        ),
+        _FracBar(filled: rightNum, parts: den, label: '$rightNum/$den'),
+      ],
+    );
+  }
+}
+
+class _FracBar extends StatelessWidget {
+  const _FracBar({required this.filled, required this.parts, required this.label});
+  final int filled, parts;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = parts < 1 ? 1 : parts;
+    return Column(
+      children: [
+        SizedBox(
+          width: 110,
+          height: 28,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                for (var i = 0; i < p; i++)
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: i < filled
+                            ? AppColors.gold
+                            : Colors.white.withValues(alpha: 0.12),
+                        border: i < p - 1
+                            ? const Border(right: BorderSide(color: Colors.black26))
+                            : null,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(label,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+      ],
+    );
+  }
+}
+
+class _MiniClock extends StatelessWidget {
+  const _MiniClock({required this.hour, required this.minute});
+  final int hour, minute;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SizedBox(
+        width: 160,
+        height: 160,
+        child: CustomPaint(painter: _ClockPainter(hour: hour, minute: minute)),
+      ),
+    );
+  }
+}
+
+class _ClockPainter extends CustomPainter {
+  _ClockPainter({required this.hour, required this.minute});
+  final int hour, minute;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2 - 8;
+    canvas.drawCircle(c, r, Paint()..style = PaintingStyle.stroke..strokeWidth = 4..color = AppColors.purpleLight);
+    final tick = Paint()..color = Colors.white70..strokeWidth = 3;
+    for (var i = 0; i < 12; i++) {
+      final a = (pi / 6) * i;
+      canvas.drawLine(
+        c + Offset(sin(a), -cos(a)) * (r - 12),
+        c + Offset(sin(a), -cos(a)) * r,
+        tick,
+      );
+    }
+    final hAng = (pi / 6) * ((hour % 12) + minute / 60);
+    final mAng = (pi / 30) * minute;
+    canvas.drawLine(c, c + Offset(sin(hAng), -cos(hAng)) * (r * 0.5), Paint()..color = Colors.white..strokeWidth = 6..strokeCap = StrokeCap.round);
+    canvas.drawLine(c, c + Offset(sin(mAng), -cos(mAng)) * (r * 0.78), Paint()..color = AppColors.gold..strokeWidth = 4..strokeCap = StrokeCap.round);
+    canvas.drawCircle(c, 6, Paint()..color = AppColors.gold);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ClockPainter old) => old.hour != hour || old.minute != minute;
+}
+
+class _InputArea extends StatelessWidget {
+  const _InputArea({required this.task, required this.enabled, required this.onSubmit});
+  final GeneratedTask task;
+  final bool enabled;
+  final void Function(Map<String, dynamic>) onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    // Выбираем механику ввода СТРОГО по полю task.mechanic (серверная правда),
+    // а не по kind из payload. Это устраняет главный источник рассинхрона.
+    switch (task.mechanic) {
+      case Mechanics.choice:
+        final opts = (task.payload['options'] as List?)?.cast<String>().map((e) => e.toString()).toList() ?? const <String>[];
+        return ChoiceInput(options: opts, enabled: enabled, onSubmit: onSubmit);
+      case Mechanics.drag:
+      case Mechanics.shade:
+        // Эти механики появятся в P8/P9; сейчас временно перенаправляем на keypad.
+        return KeypadInput(enabled: enabled, onSubmit: onSubmit);
+      case Mechanics.keypad:
+      default:
+        return KeypadInput(enabled: enabled, onSubmit: onSubmit);
+    }
+  }
+}
+
+class _HintBubble extends StatelessWidget {
+  const _HintBubble(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.gold.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.gold.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          children: [
+            const Text('💡', style: TextStyle(fontSize: 22)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700))),
+          ],
+        ),
+      );
+}
+
+class _SolvedPanel extends StatelessWidget {
+  const _SolvedPanel({required this.result, required this.onNext});
+  final SubmitResult result;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = result.reward;
+    final parts = <String>[];
+    if (r.feather > 0) parts.add('+${r.feather} ');
+    if (r.mana > 0) parts.add('+${r.mana} ✨');
+    if (r.xp > 0) parts.add('+${r.xp} ⭐');
+    final flavor = result.feedbackKey == 'success_clean'
+        ? 'Без подсказок — красавчик!'
+        : 'Умница, подсказка помогла!';
+    return MagicCard(
+      child: Column(
+        children: [
+          Text(
+            '🎉 Верно! ${parts.join('  ')}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.gold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$flavor${r.fixBonus > 0 ? '\nТы исправил ошибку — молодец!' : ''}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(onPressed: onNext, child: const Text('Следующая задача')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+=== END FILE ===
+=== FILE: lib/features/home/world_map_tab.dart ===
+import 'package:flutter/material.dart';
+
+import '../../core/theme/app_theme.dart';
+import '../../data/worlds.dart';
+import '../../models/family_models.dart';
+import '../../widgets/common.dart';
+import '../quest/engine_quest.dart'; // ← НОВЫЙ импорт вместо quest_screen.dart
+
+/// Карта 5 миров. Все острова доступны всем классам (R-04).
+class WorldMapTab extends StatelessWidget {
+  const WorldMapTab({super.key, required this.kid});
+  final ChildProfile kid;
+
+  void _open(BuildContext context, WorldInfo w) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => QuestScreen(
+        childId: kid.id,
+        worldId: w.id,
+        worldTitle: w.title,
+      ),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      children: [
+        Center(child: SpeechBubble('Куда полетим сегодня, ${kid.nickname}?')),
+        const SizedBox(height: 16),
+        for (var i = 0; i < kWorlds.length; i++) ...[
+          if (i > 0) const _PathDots(),
+          Align(
+            alignment: i.isEven ? Alignment.centerLeft : Alignment.centerRight,
+            child: FractionallySizedBox(
+              widthFactor: 0.88,
+              child: _WorldCard(
+                world: kWorlds[i],
+                recommended: kWorlds[i].fitsGrade(kid.grade),
+                onTap: () => _open(context, kWorlds[i]),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _PathDots extends StatelessWidget {
+  const _PathDots();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 30,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            for (var i = 0; i < 3; i++)
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  color: Colors.white38,
+                  shape: BoxShape.circle,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorldCard extends StatelessWidget {
+  const _WorldCard({required this.world, required this.recommended, required this.onTap});
+
+  final WorldInfo world;
+  final bool recommended;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(26),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: world.colors,
+            ),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(
+              color: recommended ? AppColors.gold : Colors.white24,
+              width: recommended ? 3 : 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Text(world.emoji, style: const TextStyle(fontSize: 46)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(world.title,
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.w900)),
+                    Text(world.topic, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _Badge(text: world.gradesLabel),
+                        if (recommended)
+                          const _Badge(text: 'Для тебя ⭐', highlight: true),
+                        const _Badge(text: 'Играть ▶', highlight: true),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.text, this.highlight = false});
+
+  final String text;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: highlight ? AppColors.gold : Colors.black.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          color: highlight ? AppColors.textDark : Colors.white,
+        ),
+      ),
+    );
+  }
+}
+=== END FILE ===
