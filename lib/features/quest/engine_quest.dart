@@ -125,7 +125,6 @@ class QuestEngine extends StateNotifier<QuestSnapshot> {
       if (result.correct) {
         state = state.copyWith(phase: QuestPhase.solved, lastResult: result);
       } else {
-        // Неверный ответ: остаёмся в ready, показываем мягкий фидбек, задача НЕ стирается.
         state = state.copyWith(phase: QuestPhase.ready, lastResult: result);
       }
     } catch (e) {
@@ -164,13 +163,12 @@ class QuestEngine extends StateNotifier<QuestSnapshot> {
 final questEngineProvider =
     StateNotifierProvider.autoDispose.family<QuestEngine, QuestSnapshot, String>(
         (ref, key) {
-  // key = "${childId}:${worldId}" для изоляции состояний разных героев/миров
   final service = ref.read(serviceProvider);
   return QuestEngine(service);
 });
 
 // ============================================================
-// ЭКРАН КВЕСТА (чистый rebuild)
+// ЭКРАН КВЕСТА
 // ============================================================
 
 class QuestScreen extends ConsumerStatefulWidget {
@@ -232,12 +230,15 @@ class _QuestScreenState extends ConsumerState<QuestScreen> {
       case QuestPhase.solved:
         final task = snap.task;
         if (task == null) {
-          // Защитная ветка: фаза ready/solving/solved без task — невозможна в теории,
-          // но страхуемся от любых гонок.
           content = const Center(
               child: CircularProgressIndicator(color: AppColors.gold));
         } else {
-          content = _ReadyBody(snapshot: snap, task: task, avatarId: avatarId);
+          content = _ReadyBody(
+            snapshot: snap,
+            task: task,
+            avatarId: avatarId,
+            engineKey: _engineKey,
+          );
         }
     }
 
@@ -264,15 +265,24 @@ class _QuestScreenState extends ConsumerState<QuestScreen> {
   }
 }
 
-class _ReadyBody extends StatelessWidget {
-  const _ReadyBody(
-      {required this.snapshot, required this.task, required this.avatarId});
+/// ИСПРАВЛЕНО (P4b-fix): был StatelessWidget, стал ConsumerWidget.
+/// Теперь метод build получает WidgetRef ref, и все обращения к
+/// questEngineProvider работают корректно.
+class _ReadyBody extends ConsumerWidget {
+  const _ReadyBody({
+    required this.snapshot,
+    required this.task,
+    required this.avatarId,
+    required this.engineKey,
+  });
+
   final QuestSnapshot snapshot;
   final GeneratedTask task;
   final String avatarId;
+  final String engineKey;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
         Expanded(
@@ -285,8 +295,6 @@ class _ReadyBody extends StatelessWidget {
                 const SizedBox(height: 8),
                 SpeechBubble(_promptText(task)),
                 const SizedBox(height: 16),
-                // ГЛАВНОЕ ИЗМЕНЕНИЕ: условие рисуется ПРЯМО здесь, не через отдельный TaskVisual.
-                // Это исключает целый класс багов передачи props между виджетами.
                 _ConditionCard(task: task),
                 if (snapshot.lastHint != null) ...[
                   const SizedBox(height: 12),
@@ -325,16 +333,15 @@ class _ReadyBody extends StatelessWidget {
           child: snapshot.showSolvedPanel
               ? _SolvedPanel(
                   result: snapshot.lastResult!,
-                  onNext: () => ref
-                      .read(questEngineProvider('${task.worldId}').notifier)
-                      .retry())
+                  onNext: () =>
+                      ref.read(questEngineProvider(engineKey).notifier).retry())
               : Column(
                   children: [
                     _InputArea(
                       task: task,
                       enabled: snapshot.canInteract,
                       onSubmit: (v) => ref
-                          .read(questEngineProvider('${task.worldId}').notifier)
+                          .read(questEngineProvider(engineKey).notifier)
                           .submitAnswer(v),
                     ),
                     const SizedBox(height: 12),
@@ -344,7 +351,7 @@ class _ReadyBody extends StatelessWidget {
                         onPressed: (!snapshot.canInteract || snapshot.hintLevel >= 3)
                             ? null
                             : () => ref
-                                .read(questEngineProvider('${task.worldId}').notifier)
+                                .read(questEngineProvider(engineKey).notifier)
                                 .askHint(),
                         icon: const Icon(Icons.lightbulb_outline_rounded),
                         label: Text('Подсказка · 5 ✨ (${snapshot.hintLevel}/3)'),
@@ -386,7 +393,6 @@ class _ReadyBody extends StatelessWidget {
 }
 
 /// Карточка с УСЛОВИЕМ задачи. Рисует числа/дроби/часы прямо из payload.
-/// Никаких внешних зависимостей от других visualizer-классов.
 class _ConditionCard extends StatelessWidget {
   const _ConditionCard({required this.task});
   final GeneratedTask task;
@@ -398,12 +404,11 @@ class _ConditionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = task.payload;
 
-    // Защита от пустого payload — явный текстовый индикатор проблемы.
     if (p.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.red.withOpacity(0.15),
+          color: Colors.red.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.redAccent),
         ),
@@ -418,7 +423,6 @@ class _ConditionCard extends StatelessWidget {
     final kind = _s(p['kind']).toLowerCase();
     final op = _s(p['op']).toLowerCase();
 
-    // Арифметика: add/sub/mul/arith
     if (kind == 'arith' || kind == 'add' || kind == 'sub' || kind == 'mul') {
       final a = _i(p['a']);
       final b = _i(p['b']);
@@ -433,7 +437,6 @@ class _ConditionCard extends StatelessWidget {
       return _BigEquation(left: '$a $symbol $b');
     }
 
-    // Сравнение дробей
     if (kind == 'compare_frac') {
       return _FractionCompareRow(
         leftNum: _i(p['left_num']),
@@ -442,7 +445,6 @@ class _ConditionCard extends StatelessWidget {
       );
     }
 
-    // Состав числа (Лес Счёта)
     if (kind == 'compose') {
       final total = _i(p['total'], 10);
       final given = _i(p['given']);
@@ -458,7 +460,6 @@ class _ConditionCard extends StatelessWidget {
       );
     }
 
-    // Закрашивание долей (Фракции Хаоса)
     if (kind == 'shade_frac') {
       final parts = _i(p['parts'], 8);
       final need = _i(p['need'], 1);
@@ -473,12 +474,10 @@ class _ConditionCard extends StatelessWidget {
       );
     }
 
-    // Часы
     if (kind == 'read_clock') {
       return _MiniClock(hour: _i(p['hour']), minute: _i(p['minute']));
     }
 
-    // Fallback: показываем сырые данные, чтобы никогда не рисовать голую пустоту.
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -503,7 +502,6 @@ class _BigEquation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // DIAG_Q: подтверждаем факт рендера уравнения.
     // ignore: avoid_print
     print('DIAG_Q [RENDER_EQUATION] "$left = ?"');
     return Padding(
@@ -642,15 +640,12 @@ class _InputArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Выбираем механику ввода СТРОГО по полю task.mechanic (серверная правда),
-    // а не по kind из payload. Это устраняет главный источник рассинхрона.
     switch (task.mechanic) {
       case Mechanics.choice:
-        final opts = (task.payload['options'] as List?)?.cast<String>().map((e) => e.toString()).toList() ?? const <String>[];
+        final opts = (task.payload['options'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[];
         return ChoiceInput(options: opts, enabled: enabled, onSubmit: onSubmit);
       case Mechanics.drag:
       case Mechanics.shade:
-        // Эти механики появятся в P8/P9; сейчас временно перенаправляем на keypad.
         return KeypadInput(enabled: enabled, onSubmit: onSubmit);
       case Mechanics.keypad:
       default:
