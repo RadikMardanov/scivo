@@ -78,10 +78,12 @@ class _ChildCard extends ConsumerStatefulWidget {
   final ChildProfile child;
 
   @override
-  State<_ChildCard> createState() => _ChildCardState();
+  // ИСПРАВЛЕНО: createState обязан вернуть ConsumerState<_ChildCard>,
+  // т.к. родительский класс — ConsumerStatefulWidget.
+  ConsumerState<_ChildCard> createState() => _ChildCardState();
 }
 
-class _ChildCardState extends State<_ChildCard> {
+class _ChildCardState extends ConsumerState<_ChildCard> {
   bool _showPin = false;
   String _pin = '';
   bool _isLoading = false;
@@ -96,14 +98,15 @@ class _ChildCardState extends State<_ChildCard> {
 
   Future<void> _verifyAndEnter() async {
     if (_pin.length != 4) return;
-    
+
     setState(() => _isLoading = true);
     try {
       final service = ref.read(serviceProvider);
       final result = await service.verifyChildPin(widget.child.id, _pin);
       if (result.ok) {
         ref.read(activeChildProvider.notifier).state = widget.child;
-        Navigator.pushReplacement<void>(
+        // ИСПРАВЛЕНО: pushReplacement в Flutter 3.47 требует два type argumentа.
+        Navigator.pushReplacement<void, void>(
           context,
           MaterialPageRoute(builder: (_) => const ChildShell()),
         );

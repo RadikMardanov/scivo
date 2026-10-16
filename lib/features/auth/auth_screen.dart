@@ -33,7 +33,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
     setState(() => _isLoading = true);
     try {
       final service = ref.read(serviceProvider);
@@ -106,7 +106,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 onPressed: _isLoading ? null : _submit,
                 icon: _isLoading
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.magic_button_rounded),
+                    // ИСПРАВЛЕНО: Icons.magic_button_rounded не существует,
+                    // заменяем на существующую auto_awesome_rounded.
+                    : const Icon(Icons.auto_awesome_rounded),
                 label: Text(_isLoading ? 'Магия...' : (_isLogin ? 'Войти' : 'Зарегистрироваться')),
               ),
               const SizedBox(height: 16),

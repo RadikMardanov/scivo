@@ -63,7 +63,7 @@ class _AddChildScreenState extends ConsumerState<AddChildScreen> {
       showSnack(context, 'PIN должен состоять из 4 цифр', isError: true);
       return;
     }
-    
+
     setState(() => _isLoading = true);
     try {
       final service = ref.read(serviceProvider);
@@ -75,7 +75,9 @@ class _AddChildScreenState extends ConsumerState<AddChildScreen> {
       );
       ref.invalidate(childrenProvider);
       if (mounted) {
-        showSnack(context, 'Герой $_name готов к приключениям! 🎉');
+        // ИСПРАВЛЕНО: $_name не существовал, читаем значение из контроллера.
+        final name = _nameController.text.trim();
+        showSnack(context, 'Герой $name готов к приключениям! 🎉');
         Navigator.pop(context, true);
       }
     } catch (e) {
@@ -97,7 +99,7 @@ class _AddChildScreenState extends ConsumerState<AddChildScreen> {
           children: [
             Center(child: ScivoRaven(size: 80, avatarId: _selectedAvatar)),
             const SizedBox(height: 16),
-            
+
             if (_step == 0) ...[
               Text('Как звать героя?', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 16),
