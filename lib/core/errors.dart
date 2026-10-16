@@ -48,6 +48,13 @@ String friendlyError(Object error) {
     'not_authorized': 'Нет доступа к этому профилю.',
     'child_not_found': 'Профиль ребёнка не найден.',
     'parent_not_found': 'Профиль родителя не найден. Выйдите и войдите снова.',
+    'task_not_found_or_expired': 'Задание устарело. Нажми «Следующая задача».',
+    'no_template_for_world': 'Для этого острова задания ещё не готовы. Выбери другой мир.',
+    'not_enough_mana': 'Не хватает маны на подсказку. Реши пару задач без подсказок!',
+    'invalid_hint_level': 'Такой подсказки нет.',
+    'hint_already_given': 'Эту подсказку ты уже видел.',
+    'unknown_kind': 'Неизвестный тип задания.',
+    'progress_not_found': 'Прогресс не найден. Выйди и войди снова.',
     'failed host lookup': 'Нет связи с интернетом.',
     'socketexception': 'Нет связи с интернетом.',
     'clientexception': 'Нет связи с сервером. Проверьте интернет.',
@@ -57,7 +64,6 @@ String friendlyError(Object error) {
 
   for (final entry in known.entries) {
     if (text.contains(entry.key)) {
-      // Для серверных ошибок регистрации оставляем код — он нужен для диагностики.
       if (entry.key.contains('database') ||
           entry.key.contains('confirmation') ||
           entry.key.contains('not authorized')) {

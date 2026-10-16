@@ -4,21 +4,33 @@ import '../../core/theme/app_theme.dart';
 import '../../data/worlds.dart';
 import '../../models/family_models.dart';
 import '../../widgets/common.dart';
+import '../quest/quest_screen.dart';
 
-/// Карта 5 миров. Задания появятся на этапе 3.
+/// Карта 5 миров. В part9 играбельны острова с механиками choice/keypad;
+/// Лес (перетаскивание) и Фракции (закрашивание) откроются в part10.
 class WorldMapTab extends StatelessWidget {
   const WorldMapTab({super.key, required this.kid});
-
   final ChildProfile kid;
 
-  void _open(BuildContext context, WorldInfo world) {
-    showScivoDialog(
-      context,
-      text: '${world.emoji} ${world.title}\n\n'
-          'Этот остров ещё строится! Гномы-строители закончат его совсем '
-          'скоро — и мы полетим туда вместе.',
-      button: 'Жду!',
-    );
+  static const _builtNow = <String>{'bridge', 'cave', 'clock'};
+
+  bool _playable(WorldInfo w) => _builtNow.contains(w.id) && w.fitsGrade(kid.grade);
+
+  void _open(BuildContext context, WorldInfo w) {
+    if (_playable(w)) {
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) =>
+            QuestScreen(childId: kid.id, worldId: w.id, worldTitle: w.title),
+      ));
+    } else {
+      showScivoDialog(
+        context,
+        text: '${w.emoji} ${w.title}\n\n'
+            'Этот остров ещё строится! Гномы-строители закончат его совсем '
+            'скоро — и мы полетим туда вместе.',
+        button: 'Жду!',
+      );
+    }
   }
 
   @override
@@ -37,6 +49,7 @@ class WorldMapTab extends StatelessWidget {
               child: _WorldCard(
                 world: kWorlds[i],
                 recommended: kWorlds[i].fitsGrade(kid.grade),
+                playable: _playable(kWorlds[i]),
                 onTap: () => _open(context, kWorlds[i]),
               ),
             ),
@@ -78,11 +91,13 @@ class _WorldCard extends StatelessWidget {
   const _WorldCard({
     required this.world,
     required this.recommended,
+    required this.playable,
     required this.onTap,
   });
 
   final WorldInfo world;
   final bool recommended;
+  final bool playable;
   final VoidCallback onTap;
 
   @override
@@ -121,10 +136,9 @@ class _WorldCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      world.title,
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-                    ),
+                    Text(world.title,
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.w900)),
                     Text(world.topic, style: const TextStyle(fontSize: 14)),
                     const SizedBox(height: 8),
                     Wrap(
@@ -134,7 +148,10 @@ class _WorldCard extends StatelessWidget {
                         _Badge(text: world.gradesLabel),
                         if (recommended)
                           const _Badge(text: 'Для тебя ⭐', highlight: true),
-                        const _Badge(text: 'Скоро 🛠️'),
+                        if (playable)
+                          const _Badge(text: 'Играть ▶', highlight: true)
+                        else
+                          const _Badge(text: 'Скоро 🛠️'),
                       ],
                     ),
                   ],
