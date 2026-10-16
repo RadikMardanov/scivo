@@ -19,6 +19,7 @@ class TaskVisual extends StatelessWidget {
       case 'mul':
         return _Equation('${_i(payload['a'])} × ${_i(payload['b'])}');
       case 'arith':
+        // ИСПРАВЛЕНО: сервер присылает kind='arith' для сложения/вычитания
         final op = _s(payload['op']) == 'sub' ? '−' : '+';
         return _Equation('${_i(payload['a'])} $op ${_i(payload['b'])}');
       case 'read_clock':
@@ -34,7 +35,14 @@ class TaskVisual extends StatelessWidget {
       case 'shade_frac':
         return _Equation('Закрась ${_i(payload['need'])} из ${_i(payload['parts'])}');
       default:
-        return const SizedBox.shrink();
+        // Если kind неизвестен — показываем сырые данные для диагностики (временная мера)
+        return Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'DEBUG: kind=${_s(payload['kind'])}, keys=${payload.keys.join(', ')}',
+            style: const TextStyle(fontSize: 12, color: Colors.orange),
+          ),
+        );
     }
   }
 }
